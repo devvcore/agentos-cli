@@ -44,6 +44,7 @@ HELP = [
     ]),
     ("Account", [
         ("whoami", "who you're signed in as"),
+        ("auth token · status", "the sign-in for scripts and tools (AgentOS Capture uses it)"),
         ("logout", "sign out on this computer"),
     ]),
 ]
@@ -152,6 +153,39 @@ def cmd_whoami(a) -> int:
     if "expires_in_min" in info:
         extra += f" · token refreshes itself ({info['expires_in_min']} min left)"
     ui.dim(f"  {extra}\n  {info['server']}" + (f" · scopes: {info['scopes']}" if info.get("scopes") else ""))
+    return 0
+
+
+def _auth_info(src: str) -> dict:
+    login = (auth.load_login() or {}) if src == "aos login" else {}
+    exp = login.get("expires_at")
+    return {"signed_in": True, "source": src, "server": paths.base_url(), "api_url": paths.api_url(),
+            "workspace_id": login.get("workspace_id"), "user_id": login.get("user_id"),
+            "scope": login.get("scope"), "expires_at": int(exp) if exp else None}
+
+
+def cmd_auth(a) -> int:
+    """`aos auth token` is for other tools (AgentOS Capture, scripts), like `gh auth token`:
+    the token goes to stdout and nowhere else; refresh is handled here, under a lock."""
+    try:
+        token, src = auth.token_source()
+    except auth.NotSignedIn as e:
+        if a.auth_cmd == "status" and (a.json or not sys.stdout.isatty()):
+            print(json.dumps({"signed_in": False, "server": paths.base_url(), "error": str(e)}))
+        else:
+            print(f"aos: {e}", file=sys.stderr)
+        return 1
+    info = _auth_info(src)
+    if a.auth_cmd == "token":
+        print(json.dumps({**info, "access_token": token}) if a.json else token)
+        return 0
+    if a.json or not sys.stdout.isatty():
+        print(json.dumps(info))
+        return 0
+    left = f" · token good for {max(0, int((info['expires_at'] - time.time()) / 60))} min, refreshes itself" if info["expires_at"] else ""
+    ui.ok(f"Signed in ({src}) to workspace {info['workspace_id'] or '?'}{left}")
+    if info["scope"]:
+        ui.dim(f"  scopes: {info['scope']}")
     return 0
 
 
@@ -479,6 +513,14 @@ def build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("whoami")
     s.add_argument("--json", action="store_true")
     s.set_defaults(fn=cmd_whoami)
+
+    s = sub.add_parser("auth", help="sign-in details for scripts and other tools")
+    ss = s.add_subparsers(dest="auth_cmd", required=True)
+    x = ss.add_parser("token", help="print a current access token (refreshed when needed)")
+    x.add_argument("--json", action="store_true", help="also its expiry, workspace and scopes")
+    x = ss.add_parser("status", help="whether you're signed in, to which workspace, until when (no token)")
+    x.add_argument("--json", action="store_true")
+    s.set_defaults(fn=cmd_auth)
 
     s = sub.add_parser("setup", help="add AgentOS to your coding agents")
     s.add_argument("--yes", "-y", action="store_true", help="no questions; use the defaults or the flags below")
