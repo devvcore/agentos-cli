@@ -95,3 +95,46 @@ def test_logout_clears(home):
     auth.save_login({"access_token": "x", "expires_at": time.time() + 3600})
     assert auth.clear_login() is True
     assert auth.load_login() is None
+
+
+def test_auth_token_prints_only_the_token_and_json_has_the_details(home, capsys):
+    from agentos_cli import cli
+    auth.save_login({"access_token": "agentos_pat_T", "refresh_token": "r", "expires_at": time.time() + 3600,
+                     "workspace_id": "ws1", "user_id": "u1", "scope": "workspace:read workspace:write"})
+    assert cli.main(["auth", "token"]) == 0
+    assert capsys.readouterr().out == "agentos_pat_T\n"
+    assert cli.main(["auth", "token", "--json"]) == 0
+    d = json.loads(capsys.readouterr().out)
+    assert d["access_token"] == "agentos_pat_T" and d["workspace_id"] == "ws1" and d["source"] == "aos login"
+    assert cli.main(["auth", "status", "--json"]) == 0
+    d = json.loads(capsys.readouterr().out)
+    assert "access_token" not in d and d["signed_in"] is True and d["workspace_id"] == "ws1"
+
+
+def test_auth_token_when_signed_out(home, capsys):
+    from agentos_cli import cli
+    assert cli.main(["auth", "token"]) == 1
+    out = capsys.readouterr()
+    assert out.out == "" and "aos login" in out.err
+    assert cli.main(["auth", "status", "--json"]) == 1
+    assert json.loads(capsys.readouterr().out)["signed_in"] is False
+
+
+def test_a_refresh_another_process_already_did_is_not_repeated(home, monkeypatch):
+    """Two processes both see an expiring token; the second must reuse the first's refresh,
+    not spend the rotated-away refresh token."""
+    auth.save_login({"access_token": "old", "refresh_token": "r1", "expires_at": time.time() + 10,
+                     "client_id": "c", "token_endpoint": "https://x/token"})
+    calls = []
+    real_load = auth.load_login
+
+    def load_then_other_process_refreshes():
+        d = real_load()
+        if not calls and d and d["access_token"] == "old":
+            calls.append("loaded")
+            auth.save_login({**d, "access_token": "new", "refresh_token": "r2", "expires_at": time.time() + 3600})
+        return d
+
+    monkeypatch.setattr(auth, "load_login", load_then_other_process_refreshes)
+    monkeypatch.setattr(auth, "refresh", lambda d, http=None: (_ for _ in ()).throw(AssertionError("refreshed twice")))
+    assert auth.token_source()[0] == "new"

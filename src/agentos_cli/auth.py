@@ -283,15 +283,56 @@ def _claude_json_token() -> str | None:
     return None
 
 
+REFRESH_MARGIN_S = 120
+
+
+class _RefreshLock:
+    """One refresh at a time across processes. Refresh tokens rotate, so two processes
+    refreshing with the same one (a background tool calling `aos auth token` while you
+    run a command) would leave one of them holding a dead token."""
+
+    def __enter__(self):
+        self.f = None
+        try:
+            import fcntl
+            path = paths.state_dir() / "auth.lock"
+            path.parent.mkdir(parents=True, exist_ok=True)
+            self.f = open(path, "a")
+            fcntl.flock(self.f, fcntl.LOCK_EX)
+        except (ImportError, OSError):
+            self.f = None
+        return self
+
+    def __exit__(self, *exc):
+        if self.f:
+            try:
+                import fcntl
+                fcntl.flock(self.f, fcntl.LOCK_UN)
+            finally:
+                self.f.close()
+
+
+def current_login() -> dict[str, Any] | None:
+    """The `aos login` record with a fresh access token (refreshed when under 2 minutes are
+    left). None when not signed in with `aos login`. Raises NotSignedIn if the refresh fails."""
+    data = load_login()
+    if not data:
+        return None
+    if data.get("expires_at", 0) - time.time() < REFRESH_MARGIN_S and data.get("refresh_token"):
+        with _RefreshLock():
+            data = load_login() or data  # another process may have refreshed while we waited
+            if data.get("expires_at", 0) - time.time() < REFRESH_MARGIN_S:
+                data = refresh(data)
+    return data
+
+
 def token_source() -> tuple[str, str]:
     """(token, where it came from). Raises NotSignedIn."""
     env = os.environ.get("AGENTOS_PAT", "").strip()
     if env:
         return env, "AGENTOS_PAT"
-    data = load_login()
+    data = current_login()
     if data:
-        if data.get("expires_at", 0) - time.time() < 120 and data.get("refresh_token"):
-            data = refresh(data)
         return data["access_token"], "aos login"
     tok = _claude_json_token()
     if tok:
