@@ -22,6 +22,15 @@ jobs:
       - run: .venv/bin/pytest -q
       - name: Installer is valid shell
         run: sh -n install.sh
+      - name: Installer runs with /bin/sh in a UTF-8 locale and in C
+        # macOS /bin/sh is bash 3.2: in a UTF-8 locale it reads a non-ASCII
+        # character right after $NAME as part of the name (Nov 2026 bug).
+        run: |
+          for loc in en_US.UTF-8 C; do
+            home="$(mktemp -d)"
+            env -i HOME="$home" PATH=/usr/bin:/bin TERM=dumb LC_ALL="$loc" AOS_NO_MODIFY_PATH=1 /bin/sh ./install.sh
+            "$home/.local/bin/aos" --version
+          done
       - name: Built wheel installs and carries the skills
         run: |
           uv build --wheel
