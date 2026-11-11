@@ -138,3 +138,22 @@ def test_a_refresh_another_process_already_did_is_not_repeated(home, monkeypatch
     monkeypatch.setattr(auth, "load_login", load_then_other_process_refreshes)
     monkeypatch.setattr(auth, "refresh", lambda d, http=None: (_ for _ in ()).throw(AssertionError("refreshed twice")))
     assert auth.token_source()[0] == "new"
+
+
+def test_auth_status_fills_in_a_missing_workspace_once(home, monkeypatch, capsys):
+    from agentos_cli import cli, work
+    auth.save_login({"access_token": "agentos_pat_T", "expires_at": time.time() + 3600, "scope": "workspace:write"})
+    asked = []
+
+    def fake_call(client, name, args):
+        asked.append(name)
+        return {"connected_as": {"workspace_id": "operations", "workspace": "Ops", "user": "Ann"}}
+
+    monkeypatch.setattr(work, "connect", lambda timeout=60, info=False: object())
+    monkeypatch.setattr(work, "call", fake_call)
+    for _ in range(2):
+        assert cli.main(["auth", "status", "--json"]) == 0
+        d = json.loads(capsys.readouterr().out)
+        assert d["workspace_id"] == "operations" and d["workspace"] == "Ops" and d["user"] == "Ann"
+    assert asked == ["workspace_map"]
+    assert auth.load_login()["access_token"] == "agentos_pat_T"

@@ -326,6 +326,18 @@ def current_login() -> dict[str, Any] | None:
     return data
 
 
+def update_login(**fields: Any) -> dict[str, Any] | None:
+    """Add fields to the saved login under the refresh lock, re-reading it first, so a token
+    another process refreshed meanwhile is never overwritten with an older one."""
+    with _RefreshLock():
+        data = load_login()
+        if not data:
+            return None
+        data.update({k: v for k, v in fields.items() if v is not None})
+        save_login(data)
+        return data
+
+
 def token_source() -> tuple[str, str]:
     """(token, where it came from). Raises NotSignedIn."""
     env = os.environ.get("AGENTOS_PAT", "").strip()
