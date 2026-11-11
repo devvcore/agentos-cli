@@ -2,7 +2,7 @@
 
 It finds your coding agents, shows what it will do in a few lines, and does it
 when you press Enter: sign in if needed, add the AgentOS MCP server to each
-agent, install the AgentOS skills, and upload the skills you wrote to your
+agent, install the AgentOS skills, and (only if you say yes) add the skills you wrote to your
 workspace. "Customize" opens the pickers; "Show file changes" shows the exact
 diffs. Every file is backed up first and `aos setup --undo` takes it all out.
 """
@@ -61,7 +61,8 @@ class Choices:
     agents: list
     mcp: bool = True
     bundled: bool = True
-    upload: bool = True
+    upload: bool = False
+    upload_only: list | None = None   # slugs the person picked; None = all of them
     ws_slugs: list = field(default_factory=list)
     compression: bool = False
 
@@ -89,6 +90,41 @@ def _signed_in() -> tuple[bool, str]:
 def _client():
     from .work import connect
     return connect()
+
+
+def _local(c: "Choices") -> list[dict]:
+    return S.local_skills([d for d, _ in S.target_dirs([a.id for a in c.agents])] + [paths.home() / ".codex" / "skills"])
+
+
+def ask_upload(c: "Choices", ws_cache: dict) -> bool | None:
+    """Ask once whether to add the person's own skills to the shared workspace.
+    Default is no: it puts their files where their team and its bots can read them."""
+    import questionary
+    cands = _local(c)
+    if "list" in ws_cache:
+        cands = S.not_in_workspace(cands, ws_cache["list"])
+    if not cands:
+        return False
+    n = len(cands)
+    ui.console.print(f"You have [bold]{n}[/] skill{'s' * (n != 1)} of your own here "
+                     f"[dim]({_names((s['name'] for s in cands), 3)})[/].")
+    pick = questionary.select(
+        "Add them to your AgentOS workspace? Your team and its bots will be able to see and use them.",
+        choices=["Not now", f"Yes, add all {n}", "Choose which…"], default="Not now",
+        style=ui.qstyle(), qmark="", instruction=" ").ask()
+    if pick is None:
+        return None
+    if pick == "Not now":
+        c.upload, c.upload_only = False, None
+    elif pick.startswith("Yes"):
+        c.upload, c.upload_only = True, None
+    else:
+        got = _checkbox("Which skills?", [questionary.Choice(s["name"], value=s["slug"], checked=False) for s in cands])
+        if got is None:
+            return None
+        c.upload, c.upload_only = bool(got), list(got)
+    ui.console.print()
+    return True
 
 
 def build_plan(c: Choices, force: bool, client=None, ws_cache: dict | None = None) -> Plan:
@@ -119,7 +155,9 @@ def build_plan(c: Choices, force: bool, client=None, ws_cache: dict | None = Non
             status, dest = S.plan_install(sk, base, force)
             p.skills.append((sk, base, users, status, dest))
     if c.upload:
-        local = S.local_skills([d for d, _ in S.target_dirs([a.id for a in c.agents])] + [paths.home() / ".codex" / "skills"])
+        local = _local(c)
+        if c.upload_only is not None:
+            local = [s for s in local if s["slug"] in c.upload_only]
         if client is not None and "list" in ws_cache:
             p.uploads = S.not_in_workspace(local, ws_cache["list"])
         else:
@@ -146,9 +184,9 @@ def render(p: Plan, c: Choices, signed: bool, skipped_claude: bool) -> bool:
         dirs = sorted({ui.short(x[1]) for x in new_sk})
         rows.append((f"Install {len(names)} AgentOS skill{'s' * (len(names) != 1)}", " and ".join(dirs)))
     if p.uploads:
-        rows.append((f"Upload {len(p.uploads)} of your skills to your workspace", _names(s["name"] for s in p.uploads)))
+        rows.append((f"Add {len(p.uploads)} of your skills to your workspace", _names(s["name"] for s in p.uploads)))
     elif p.upload_pending:
-        rows.append((f"Upload your skills to your workspace", f"{p.upload_pending} found here; ones already there are skipped"))
+        rows.append(("Add your skills to your workspace", f"{p.upload_pending} picked; ones already there are skipped"))
     if p.compression:
         rows.append(("Turn on compression", "fewer tokens from tool output, via agentos-capture"))
     from rich.table import Table
@@ -188,7 +226,7 @@ def customize(c: Choices, found, signed: bool, ws_cache: dict) -> Choices | None
     parts = [
         questionary.Choice("AgentOS MCP server", value="mcp", checked=c.mcp),
         questionary.Choice("AgentOS skills", value="bundled", checked=c.bundled),
-        questionary.Choice("Upload my own skills to the workspace", value="upload", checked=c.upload),
+        questionary.Choice("Add my own skills to the workspace", value="upload", checked=c.upload),
         questionary.Choice("Pick skills from the workspace library", value="ws", checked=bool(c.ws_slugs)),
         questionary.Choice("Compression (fewer tokens from tool output)", value="compression",
                            checked=c.compression and cap, disabled=None if cap else "coming soon"),
@@ -240,9 +278,9 @@ def run(args) -> int:
     c = Choices(
         agents=agents, mcp=not getattr(args, "no_mcp", False),
         bundled=skills_flag in ("agentos", "all"),
-        # Uploading writes to the workspace: on by default when a person is at the
-        # keyboard and sees the plan; with --yes only when asked for.
-        upload=getattr(args, "upload", None) if getattr(args, "upload", None) is not None else inter,
+        # Adding the person's skills to the shared workspace only happens when they
+        # say so: --upload, or "yes" to the one question setup asks.
+        upload=bool(getattr(args, "upload", None)),
         ws_slugs=[x.strip() for x in (getattr(args, "workspace_skills", "") or "").split(",") if x.strip()],
         compression=bool(getattr(args, "compression", False) or getattr(args, "capture", False)))
 
@@ -265,12 +303,16 @@ def run(args) -> int:
         if skills_flag in ("workspace", "all") and not c.ws_slugs:
             c.ws_slugs = [w["slug"] for w in ws_cache["list"]]
 
-    if signed and (c.upload or c.ws_slugs or skills_flag in ("workspace", "all")):
+    will_ask = inter and getattr(args, "upload", None) is None
+    if signed and (c.upload or will_ask or c.ws_slugs or skills_flag in ("workspace", "all")):
         try:
             load_workspace()
         except Exception as e:
             ui.warn(f"Couldn't read your workspace ({type(e).__name__}); skills upload skipped.")
-            c.upload, c.ws_slugs = False, []
+            c.upload, c.ws_slugs, will_ask = False, [], False
+    if will_ask and ask_upload(c, ws_cache) is None:
+        ui.dim("Nothing was changed.")
+        return 130
 
     while True:
         plan = build_plan(c, args.force, client, ws_cache)
