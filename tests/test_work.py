@@ -54,3 +54,33 @@ def test_help_and_version(capsys):
     assert cli.main([]) == 0
     assert cli.main(["--version"]) == 0
     assert f"aos {__version__}" in capsys.readouterr().out
+
+
+def test_errors_are_plain_sentences():
+    from agentos_cli import mcp
+    e = mcp.ToolError("ValueError: name must identify a workspace tool\nRecovery: Discover it with workspace_tools.")
+    msg = mcp.friendly_error(e)
+    assert msg.startswith("name must identify a workspace tool") and "Hint: Discover" in msg
+    assert "[{" not in msg and "'type'" not in msg
+    assert mcp.content_text([{"type": "text", "text": "rm: /x: no such file"}]) == "rm: /x: no such file"
+
+
+class CountingClient(FakeClient):
+    url = "https://fake.test/api/mcp"
+
+    def __init__(self, result):
+        super().__init__(result)
+        self.listed = 0
+
+    def list_tools(self):
+        self.listed += 1
+        return super().list_tools()
+
+
+def test_top_level_tools_are_cached_on_disk(home, monkeypatch):
+    monkeypatch.setattr(work, "_TOP", None)
+    c = CountingClient({"ok": True})
+    work.call(c, "context", {})
+    monkeypatch.setattr(work, "_TOP", None)  # a new process
+    work.call(c, "context", {})
+    assert c.listed == 1
