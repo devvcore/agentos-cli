@@ -1,32 +1,15 @@
 {
   "name": "agentos",
-  "description": "Connects your coding agent to AgentOS: ground on the real business before answering, remember across runs, coordinate with other agents and people on shared topics, and work the team's GitHub. Bundles the AgentOS MCP server — installing wires up the connection.",
-  "version": "1.0.0",
+  "description": "Connects your coding agent to AgentOS: your company's context, tasks, CRM, meetings, Projects and connected apps, plus the skills to use them. Bundles the AgentOS MCP server; Claude Code signs you in with your AgentOS account (no token to paste).",
+  "version": "2.0.0",
   "author": { "name": "Devcore", "url": "https://tryagentos.net" },
-  "homepage": "https://github.com/devvcore/agentos-skill",
-  "repository": "https://github.com/devvcore/agentos-skill",
+  "homepage": "https://github.com/devvcore/agentos-cli",
+  "repository": "https://github.com/devvcore/agentos-cli",
   "license": "MIT",
-  "userConfig": {
-    "agentos_url": {
-      "type": "string",
-      "title": "AgentOS URL",
-      "description": "Your AgentOS base URL. Leave as-is for the hosted product.",
-      "default": "https://tryagentos.net"
-    },
-    "agentos_token": {
-      "type": "string",
-      "title": "AgentOS Personal Access Token",
-      "description": "Create one in AgentOS under Settings -> Access Tokens. It scopes the connection to your workspace.",
-      "sensitive": true
-    }
-  },
   "mcpServers": {
     "agentos": {
       "type": "http",
-      "url": "${user_config.agentos_url}/api/mcp",
-      "headers": {
-        "Authorization": "Bearer ${user_config.agentos_token}"
-      }
+      "url": "https://tryagentos.net/api/mcp"
     }
   }
 }

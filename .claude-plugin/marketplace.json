@@ -5,7 +5,7 @@
   "plugins": [
     {
       "name": "agentos",
-      "description": "Ground on the real business, remember across runs, coordinate on shared topics, work the team's GitHub — the AgentOS MCP tools + the awareness to use them. Bundles the MCP connection.",
+      "description": "Your company's context, tasks, CRM, meetings, Projects and connected apps in Claude Code, plus the skills to use them. Bundles the AgentOS MCP server.",
       "source": "./",
       "category": "productivity"
     }
