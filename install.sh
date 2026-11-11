@@ -72,7 +72,11 @@ case ":$PATH:" in
   *":$BIN:"*) ;;
   *)
     if [ -z "${AOS_NO_MODIFY_PATH:-}" ]; then
-      uv tool update-shell >/dev/null 2>&1 && ok "Added $BIN to your PATH (open a new terminal, or run: export PATH=\"$BIN:\$PATH\")"
+      if uv tool update-shell >/dev/null 2>&1; then
+        ok "Added $BIN to your PATH (open a new terminal, or run: export PATH=\"$BIN:\$PATH\")"
+      else
+        say "Add $BIN to your PATH: export PATH=\"$BIN:\$PATH\""
+      fi
     else
       say "Add $BIN to your PATH: export PATH=\"$BIN:\$PATH\""
     fi
