@@ -22,6 +22,8 @@ def home(tmp_path, monkeypatch):
     monkeypatch.setenv("AOS_NO_KEYRING", "1")
     monkeypatch.setenv("AOS_NONINTERACTIVE", "1")
     monkeypatch.delenv("AGENTOS_PAT", raising=False)
+    for v in ("OPENBOT_AGENT_PROCESS", "CLAUDE_CODE_ENTRYPOINT", "CLAUDE_CODE_SESSION_ID", "AOS_AS", "AOS_AGENT"):
+        monkeypatch.delenv(v, raising=False)
     monkeypatch.delenv("AGENTOS_URL", raising=False)
     monkeypatch.delenv("AGENTOS_MCP_URL", raising=False)
     monkeypatch.setattr(shutil, "which", lambda *_a, **_k: None)
