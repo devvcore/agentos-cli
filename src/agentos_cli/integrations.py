@@ -66,8 +66,7 @@ def service_main(service, argv=None, *, client_factory=Client):
         for flag, field in (("cursor", "starting_after"), ("customer", "customer"), ("status", "status")):
             if getattr(opts, flag): payload[field] = getattr(opts, flag)
     try:
-        client = client_factory()
-        client.initialize(client_name="agentos-service-cli")
+        client = client_factory()  # stateless endpoint: no initialize round trip
         result, described = _rpc(client, "integration_search", {"q": slug, "tool_slug": slug})
         rows = described.get("tools", []) if isinstance(described, dict) else []
         if result.get("isError") or len(rows) != 1:
@@ -106,11 +105,40 @@ def service_main(service, argv=None, *, client_factory=Client):
         return 1
 
 
+def _render(command, payload):
+    """Tables for a person at a terminal; agents and pipes get the JSON."""
+    from . import ui
+    if not isinstance(payload, dict):
+        print(json.dumps(payload, ensure_ascii=False))
+        return
+    if command == "list":
+        rows = payload.get("platforms") or []
+        t = ui.table("App", "Connected", "Accounts", "Actions")
+        for r in sorted(rows, key=lambda r: (not r.get("connected"), r.get("toolkit_slug") or "")):
+            accts = ", ".join(a.get("label") or a.get("connection_id", "") for a in r.get("accounts") or [] if isinstance(a, dict))
+            t.add_row(f"[bold]{r.get('toolkit_name') or r.get('toolkit_slug')}[/]",
+                      "[green]✓[/]" if r.get("connected") else "[dim]—[/]", accts or "[dim]—[/]", str(r.get("tool_count") or ""))
+        ui.console.print(t)
+        ui.dim("Find an action: `aos integrations search <words>`. Not connected? `aos connect <app>`.")
+        return
+    rows = payload.get("tools") or []
+    t = ui.table("Action", "App", "Connected", "What it does")
+    for r in rows:
+        desc = " ".join(str(r.get("description") or r.get("name") or "").split())
+        t.add_row(f"[bold]{r.get('slug', '')}[/]", r.get("toolkit_slug", ""), "[green]✓[/]" if r.get("connected") else "[dim]—[/]",
+                  desc if len(desc) <= 60 else desc[:59] + "…")
+    ui.console.print(t)
+    if payload.get("next_offset") is not None:
+        ui.dim(f"More results: --offset {payload['next_offset']}")
+    ui.dim("Arguments: `aos integrations describe <ACTION>`. Run: `aos integrations call <ACTION> --args-file -`.")
+
+
 def main(argv=None, *, client_factory=Client):
     parser = argparse.ArgumentParser(prog="aos integrations")
     commands = parser.add_subparsers(dest="command", required=True)
-    commands.add_parser("list")
+    commands.add_parser("list").add_argument("--json", action="store_true")
     search = commands.add_parser("search")
+    search.add_argument("--json", action="store_true")
     search.add_argument("query")
     search.add_argument("--offset", type=int, default=0)
     describe = commands.add_parser("describe")
@@ -119,6 +147,7 @@ def main(argv=None, *, client_factory=Client):
     call.add_argument("tool")
     call.add_argument("--args-file", default="-", help="JSON object file; default stdin. Never put provider credentials here.")
     opts = parser.parse_args(argv)
+    opts.json = getattr(opts, "json", False)
     if opts.command == "list":
         tool, args = "integration_list", {}
     elif opts.command == "search":
@@ -139,8 +168,7 @@ def main(argv=None, *, client_factory=Client):
             return 2
         tool, args = "integration_call", {"tool_slug": opts.tool, "arguments": payload}
     try:
-        client = client_factory()
-        client.initialize(client_name="agentos-integrations-cli")
+        client = client_factory()  # stateless endpoint: no initialize round trip
         response = client._post({"jsonrpc": "2.0", "id": next(client._ids), "method": "tools/call",
                                  "params": {"name": "workspace_call", "arguments": {
                                      "name": tool, "arguments": json.dumps(args)}}})
@@ -150,7 +178,10 @@ def main(argv=None, *, client_factory=Client):
             return 1
         result = response.get("result", {})
         payload = result.get("structuredContent", result)
-        print(json.dumps(payload, ensure_ascii=False))
+        if opts.command in ("list", "search") and sys.stdout.isatty() and not opts.json and not result.get("isError"):
+            _render(opts.command, payload)
+        else:
+            print(json.dumps(payload, ensure_ascii=False))
         if result.get("isError"):
             return 1
         if isinstance(payload, dict):

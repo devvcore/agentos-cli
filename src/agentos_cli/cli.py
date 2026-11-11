@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -32,6 +33,7 @@ HELP = [
     ("Spaces", [
         ("link · status · pull · push", "share a folder as a space with versions"),
         ("diff · restore · log", "see and undo changes"),
+        ("resolve <file>", "after a pull conflict: mark the file merged so push works again"),
         ("claim · release · handoff", "coordinate with people and other agents"),
         ("wait · watch", "block until a push, claim or handoff happens"),
     ]),
@@ -64,6 +66,15 @@ def print_help() -> None:
     ui.console.print(t)
     ui.console.print()
     ui.dim(EXIT_CODES + "\nOutput is JSON when piped. Run `aos <command> --help` for options.")
+
+
+def _one_line(text, n: int = 72) -> str:
+    """First sentence or n characters of a description, on one line, with an ellipsis when cut."""
+    t = " ".join(str(text or "").split())
+    m = re.match(r"(.+?[.!?])(\s|$)", t)
+    if m and len(m.group(1)) <= n:
+        return m.group(1)
+    return t if len(t) <= n else t[: n - 1].rstrip() + "…"
 
 
 def _emit(data, as_json: bool | None = None) -> None:
@@ -105,6 +116,14 @@ def cmd_logout(a) -> int:
     return 0
 
 
+def _short_version(v: str | None) -> str:
+    """0.2.0+b771d577c0b6…(64 hex) -> 0.2.0+b771d57"""
+    if not v:
+        return "?"
+    base, _, build = v.partition("+")
+    return f"{base}+{build[:7]}" if build else base
+
+
 def cmd_whoami(a) -> int:
     try:
         _, src = auth.token_source()
@@ -112,21 +131,27 @@ def cmd_whoami(a) -> int:
         ui.fail(str(e))
         return 1
     from .work import connect, call
-    client = connect(timeout=20)
-    info = {"signed_in_with": src, "server": paths.base_url(), "server_version": client.server_info.get("version")}
-    try:
-        res = call(client, "agent_access", {})
-        if isinstance(res, dict):
-            for k in ("person", "user", "workspace", "agent", "identity", "you"):
-                if k in res:
-                    info[k] = res[k]
-    except Exception:
-        pass
+    res = call(connect(timeout=20), "workspace_map", {})
+    who = (res or {}).get("connected_as") if isinstance(res, dict) else None
+    who = who if isinstance(who, dict) else {}
     login = auth.load_login() or {}
+    info = {"user": who.get("user"), "role": who.get("role"), "workspace": who.get("workspace"),
+            "workspace_id": who.get("workspace_id") or login.get("workspace_id"),
+            "signed_in_with": src, "server": paths.base_url()}
     if src == "aos login":
         info["scopes"] = login.get("scope")
         info["expires_in_min"] = max(0, int((login.get("expires_at", 0) - time.time()) / 60))
-    _emit(info, a.json)
+    if a.json or not sys.stdout.isatty():
+        print(json.dumps(info, ensure_ascii=False))
+        return 0
+    from rich.markup import escape
+    name = escape(info["user"] or "(name not shared)")
+    ws = escape(info["workspace"] or info["workspace_id"] or "?")
+    ui.ok(f"[bold]{name}[/] · {info['role'] or 'member'} of [bold]{ws}[/]")
+    extra = f"signed in with {src}"
+    if "expires_in_min" in info:
+        extra += f" · token refreshes itself ({info['expires_in_min']} min left)"
+    ui.dim(f"  {extra}\n  {info['server']}" + (f" · scopes: {info['scopes']}" if info.get("scopes") else ""))
     return 0
 
 
@@ -299,7 +324,7 @@ def _skills_table(rows, a, cols) -> int:
             elif c == "path":
                 v = ui.short(v)
             elif c == "description":
-                v = f"[dim]{str(v or '')[:70]}[/]"
+                v = f"[dim]{_one_line(v, 70)}[/]"
             vals.append(str(v if v is not None else ""))
         t.add_row(*vals)
     ui.console.print(t)
@@ -309,18 +334,45 @@ def _skills_table(rows, a, cols) -> int:
 # ---------------------------------------------------------------- work
 
 def cmd_tools(a) -> int:
+    from concurrent.futures import ThreadPoolExecutor
     from .work import connect, call
     client = connect()
     args = {k: v for k, v in {"q": a.q, "family": a.family, "name": a.name, "limit": a.limit}.items() if v}
-    res = client.call("workspace_tools", **args)
+    # A search also looks through connected-app actions (Slack, Gmail, GitHub…), in parallel:
+    # those live behind `aos integrations`, and people search for "send slack", not for a family.
+    want_apps = bool(a.q) and not a.name and not a.family
+    with ThreadPoolExecutor(2) as pool:
+        tools_f = pool.submit(client.call, "workspace_tools", **args)
+        apps_f = pool.submit(call, client, "integration_search", {"q": a.q}) if want_apps else None
+        res = tools_f.result()
+        try:
+            apps = apps_f.result() if apps_f else None
+        except Exception:
+            apps = None
+    app_rows = [t for t in ((apps or {}).get("tools") or []) if isinstance(t, dict)][: a.limit] if isinstance(apps, dict) else []
     if a.json or not sys.stdout.isatty() or a.name:
+        if want_apps and isinstance(res, dict):
+            res = {**res, "app_actions": app_rows}
         _emit(res, a.json)
         return 0
-    t = ui.table("Tool", "Family", "What it does")
-    for tool in (res or {}).get("tools", []):
-        t.add_row(f"[bold]{tool['name']}[/]", f"[dim]{tool.get('family', '')}[/]", (tool.get("description") or "")[:90])
-    ui.console.print(t)
-    if (res or {}).get("next_cursor"):
+    tools = (res or {}).get("tools", [])
+    if tools:
+        t = ui.table("Tool", "Family", "What it does")
+        for tool in tools:
+            t.add_row(f"[bold]{tool['name']}[/]", f"[dim]{tool.get('family', '')}[/]", _one_line(tool.get("description")))
+        ui.console.print(t)
+        ui.dim("Run one with `aos call <tool> '{...}'`; `aos tools --name <tool>` shows its arguments.")
+    if app_rows:
+        ui.console.print()
+        t = ui.table("App action", "App", "Connected", "What it does", title="Connected-app actions")
+        for r in app_rows:
+            t.add_row(f"[bold]{r.get('slug', '')}[/]", r.get("toolkit_slug", ""),
+                      "[green]✓[/]" if r.get("connected") else "[dim]—[/]", _one_line(r.get("description") or r.get("name"), 60))
+        ui.console.print(t)
+        ui.dim("Run one with `aos integrations call <ACTION> --args-file -`; `aos integrations describe <ACTION>` shows its arguments.")
+    if not tools and not app_rows:
+        ui.dim("Nothing matched. Try fewer words.")
+    elif (res or {}).get("next_cursor"):
         ui.dim(f"{res.get('total')} tools match; narrow with --q or --family.")
     return 0
 
@@ -345,6 +397,32 @@ def cmd_context(a) -> int:
 
 # ---------------------------------------------------------------- doctor
 
+def capture_health() -> tuple[str, str]:
+    """(level, message) for AgentOS Capture: whether it runs and whether anything goes through it."""
+    exe = shutil.which("agentos-capture")
+    if not exe:
+        return "dim", "Compression + capture: not installed (optional; `aos setup --capture`)"
+    cfg = paths.read_json(paths.home() / ".agentos-capture" / "config.json", {})
+    port = int(cfg.get("port") or 8797)
+    try:
+        import urllib.request
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}/_capture/status", timeout=1.5) as r:
+            st = json.loads(r.read())
+    except Exception:
+        return "warn", (f"Compression + capture: installed but not running on port {port}. "
+                        "Run `agentos-capture install`, then `agentos-capture doctor`.")
+    reqs = int((st.get("counters") or {}).get("requests") or 0)
+    hook = ((st.get("plugin_status") or {}).get("hook") or {})
+    counts = hook.get("counts") if isinstance(hook.get("counts"), dict) else {}
+    seen = reqs + sum(int(v) for v in counts.values() if isinstance(v, (int, float)))
+    if seen == 0:
+        up = float(st.get("uptime_s") or 0)
+        when = f"in {int(up // 60)} min" if up >= 60 else "yet"
+        return "warn", (f"Compression + capture: running on port {port}, but no agent has gone through it {when}. "
+                        "Restart your agents, then run `agentos-capture doctor` if it stays at zero.")
+    return "ok", f"Compression + capture: running on port {port} · {seen} request(s) since it started"
+
+
 def cmd_doctor(a) -> int:
     ui.header("aos doctor", paths.base_url())
     rc = 0
@@ -353,10 +431,16 @@ def cmd_doctor(a) -> int:
         ui.ok(f"Signed in ({src})")
         try:
             from .work import connect
-            c = connect(timeout=15)
-            ui.ok(f"AgentOS reachable · server {c.server_info.get('version', '?')} · {len(c.list_tools())} top-level tools")
+            t0 = time.perf_counter()
+            c = connect(timeout=15, info=True)
+            ms = (time.perf_counter() - t0) * 1000
+            ui.ok(f"AgentOS reachable · server {_short_version(c.server_info.get('version'))} · {ms:.0f} ms")
+        except auth.NotSignedIn as e:
+            ui.fail(str(e))
+            rc = 1
         except Exception as e:
-            ui.fail(f"AgentOS not reachable with this sign-in ({type(e).__name__}). Try `aos login`.")
+            from .mcp import friendly_error
+            ui.fail(f"AgentOS not reachable with this sign-in: {friendly_error(e)}")
             rc = 1
     except auth.NotSignedIn:
         ui.warn("Not signed in. Run `aos login`.")
@@ -370,8 +454,8 @@ def cmd_doctor(a) -> int:
         (ui.ok if st in ("ours", "link") else ui.warn)(f"{ag.name}: {msg}; {n} AgentOS skill(s)  [dim]{ui.short(where)}[/]")
     if not found:
         ui.warn("No coding agents found on this computer.")
-    cap = shutil.which("agentos-capture")
-    (ui.ok if cap else ui.dim)("Compression + capture: " + ("agentos-capture installed" if cap else "agentos-capture not installed"))
+    level, msg = capture_health()
+    {"ok": ui.ok, "warn": ui.warn, "dim": ui.dim}[level](msg)
     if any(A.mcp_status(ag) == "absent" for ag, _ in found):
         ui.dim("Run `aos setup` to add AgentOS where it's missing.")
     return rc
@@ -468,6 +552,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def _friendly(fn):
+    from .mcp import friendly_error
     try:
         return fn()
     except KeyboardInterrupt:
@@ -475,13 +560,15 @@ def _friendly(fn):
     except auth.NotSignedIn as e:
         ui.fail(str(e))
         return 1
-    except (OSError, RuntimeError) as e:
-        if isinstance(e, (FileNotFoundError, PermissionError)):
-            ui.fail(str(e))
-            return 1
-        # urllib errors can include URLs or bodies; name the type only.
-        msg = str(e) if isinstance(e, RuntimeError) and len(str(e)) < 300 and "Bearer" not in str(e) else type(e).__name__
-        ui.fail(f"AgentOS request failed: {msg}. Nothing was retried.")
+    except (FileNotFoundError, PermissionError) as e:
+        ui.fail(str(e))
+        return 1
+    except (OSError, RuntimeError, ValueError) as e:
+        msg = friendly_error(e)
+        if "Bearer" in msg:  # never echo a credential
+            msg = type(e).__name__
+        from rich.markup import escape
+        ui.fail(escape(msg))
         return 1
 
 
