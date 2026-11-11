@@ -1,28 +1,51 @@
-<p align="center"><strong>AgentOS — ground on the real business before you answer.</strong></p>
+<p align="center"><strong>AgentOS CLI</strong>: put AgentOS in every coding agent on your computer, and use it from the terminal.</p>
 
-A plugin (Claude Code) / skill (Codex) that makes any coding-agent session reach for **AgentOS** instead of answering the business from its own training — and lets it coordinate with your other agents and teammates on shared **loops**.
+```sh
+curl -fsSL https://tryagentos.net/install.sh | sh
+aos login      # sign in, or create your AgentOS account, in the browser
+aos setup      # add AgentOS to Claude Code, Codex, Cursor, opencode, Gemini CLI…
+```
 
-## What it gives your agent
+`aos setup` finds the coding agents on your computer, lets you tick what to add (the AgentOS MCP server, the AgentOS skills, your workspace's skills, compression), shows you the exact change to each config file, backs it up, and applies it. Each agent then signs in to AgentOS once with OAuth; no tokens are written to disk. `aos setup --undo` takes it all out again.
 
-- **Grounding** — `mcp__agentos__context(concept)` surveys the wiki, CRM, tasks, meetings, Slack, and open loops in one call before it states a fact.
-- **Loops** — the coordination bus: agents and people working the same thing subscribe to a shared thread; new posts arrive automatically on the agent's next tool call. It posts one line when it claims, finishes, or discovers something a co-worker would trip over.
-- **GitHub** — when the workspace has GitHub connected, the sandbox is already authenticated: `git clone`, branch, and `gh pr create` just work.
-- **Memory** — `recall_memory` / `journal_add` across runs; `promote_fact` into the shared Business Index.
-- **The skill flywheel** — `skills_create` writes reusable know-how back so no agent re-derives it.
+## What you can do with it
 
-## Install
+| | |
+|---|---|
+| **Account** | `aos login` · `aos whoami` · `aos logout` |
+| **Your agents** | `aos agents` · `aos setup [--dry-run] [--yes] [--undo]` · `aos doctor` |
+| **Skills** | `aos skills list` · `add <name>` · `remove` · `update` · `outdated` · `search` |
+| **Work** | `aos context "Acme renewal"` · `aos tools --q invoice` · `aos call <any workspace tool> '{…}'` |
+| **Connected apps** | `aos connect hubspot` · `aos integrations search\|describe\|call` |
+| **Credentials** | `aos secrets set stripe_api_key` (hidden prompt or stdin) · `aos secrets list` · `aos http stripe_api_key https://api.stripe.com/v1/…` (AgentOS adds the key; it never reaches your computer) |
+| **Spaces** | `aos link` · `pull` · `push` · `status` · `diff` · `restore` · `log` · `claim` · `release` · `handoff` · `wait` · `watch` |
 
-**Claude Code** (bundles the MCP connection):
-```bash
-claude plugin marketplace add devvcore/agentos-skill
+Output is JSON when piped, so agents can use every command. Exit codes: `0` ok, `1` error, `2` waiting for a person's approval, `3` someone else has claimed it, `4` timed out.
+
+## Skills
+
+[`skills/`](skills) holds the AgentOS skills: `aos`, `agentos-setup`, `agentos-workspace`, `agentos-tasks`, `agentos-crm`, `agentos-meetings` and `agentos-spaces`. `aos setup` installs them into `~/.claude/skills` and `~/.agents/skills`. They are plain `SKILL.md` folders, so any agent that reads skills can use them.
+
+## Claude Code plugin
+
+```sh
+claude plugin marketplace add devvcore/agentos-cli
 claude plugin install agentos@agentos
 ```
-You're prompted for your AgentOS URL + Personal Access Token; the MCP server wires up automatically.
+The plugin bundles the MCP server and the skills, and Claude Code signs you in the first time it connects. `aos setup` does the same for every other agent.
 
-**Codex** (no plugin system — copy the skill + `codex mcp add`): see [INSTALL.md](./INSTALL.md).
+## Install options
 
-## Two layers
-- **Capability** = the `mcp__agentos__*` tools (from the MCP server).
-- **Awareness** = this skill (`skills/agentos/SKILL.md`), the awareness to use them.
+- Pin a version: `curl -fsSL https://tryagentos.net/install.sh | AOS_VERSION=v0.2.0 sh`
+- Straight from GitHub: `curl -fsSL https://raw.githubusercontent.com/devvcore/agentos-cli/main/install.sh | sh`
+- Without the script: `uv tool install git+https://github.com/devvcore/agentos-cli`
+- No browser on this machine (CI, a server): set `AGENTOS_PAT` to a personal access token from AgentOS Settings.
+- Uninstall: `aos setup --undo && aos logout && uv tool uninstall agentos-cli`
 
-The Claude Code plugin ships both. Full instructions, self-hosting, and troubleshooting: [INSTALL.md](./INSTALL.md).
+## Develop
+
+```sh
+uv venv && uv pip install -e '.[dev]' && .venv/bin/pytest -q
+```
+
+MIT licensed. [tryagentos.net](https://tryagentos.net)
