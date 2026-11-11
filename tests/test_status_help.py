@@ -27,7 +27,7 @@ def test_help_topics_and_aliases(capsys):
     for t in ("overview", "mcp", "link", "sync", "capture", "secrets", "status", "setup", "skills"):
         assert cli.main(["help", t]) == 0
     out = capsys.readouterr().out
-    assert "no background auto-sync" in out and "private preview" in out
+    assert "aos sync --background" in out and "private preview" in out
     assert cli.main(["help", "nope"]) == 2
 
 

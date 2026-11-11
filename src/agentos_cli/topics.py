@@ -16,11 +16,11 @@ connected apps. `aos` puts it on this computer, in three ways:
 
 Optional:
   Spaces (`aos link`)    share a folder with people and agents, with versions.
-                         You push and pull; nothing syncs by itself.
+                         You push and pull, or `aos sync` does it as you work.
   Capture                compression and work capture. Private preview.
 
 `aos status` shows all of it at a glance. Topics: aos help setup | mcp | skills |
-spaces | capture | secrets | status
+spaces | sync | capture | secrets | status
 """),
     "setup": ("aos setup", """
 Finds the coding agents on this computer and shows one line per agent: what it
@@ -67,12 +67,25 @@ A space is a folder shared through AgentOS, with versions, like a tiny Git.
   aos status            what changed, who's ahead, who has claimed what
   aos claim / handoff / wait   coordinate with other people and agents
 
-Nothing syncs by itself: changes move only when you (or your agent) run
-`aos push` and `aos pull`. `aos watch` shows changes as they happen. There is
-no background auto-sync, and you shouldn't need a script for it; if macOS
-says a "sync" item from an unidentified developer wants to run in the
-background, that is a script someone added, not part of aos (see
-`aos help status` to check what's running).
+Changes move when you (or your agent) run `aos push` and `aos pull`, or
+automatically while `aos sync` runs (`aos help sync`). `aos watch` shows
+changes as they happen.
+"""),
+    "sync": ("aos sync: push and pull for you", """
+In a linked folder, `aos sync` watches it: a few seconds after you stop
+editing it pushes, and every 15 s it pulls newer versions. If you both changed
+a file it stops, so nothing is overwritten: merge, `aos resolve <file>`, and
+run it again. A file someone else has claimed waits until they release it.
+
+  aos sync                 in this terminal (Ctrl-C stops)
+  aos sync --background    keep syncing while you're logged in (macOS login item)
+  aos sync --stop          turn background sync off for this folder
+  aos sync --once          pull and push once, then exit
+
+--background tells you first that macOS will show "Background Items Added",
+maybe with "unidentified developer": that item is aos itself, and it's expected.
+Don't write your own sync script or LaunchAgent; use this. `aos status` shows
+whether it's running.
 """),
     "capture": ("Capture and compression", """
 Capture is separate from spaces. It runs a small proxy on this computer that:
@@ -103,7 +116,7 @@ linked folder, the space (changes, versions, claims).
 """),
 }
 
-ALIASES = {"link": "spaces", "space": "spaces", "sync": "spaces", "push": "spaces", "pull": "spaces",
+ALIASES = {"link": "spaces", "space": "spaces", "auto-sync": "sync", "autosync": "sync", "push": "spaces", "pull": "spaces",
            "compression": "capture", "keys": "secrets", "connect": "secrets", "credentials": "secrets",
            "login": "setup", "agents": "mcp", "about": "overview", "concepts": "overview"}
 

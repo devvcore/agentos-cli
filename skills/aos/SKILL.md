@@ -48,7 +48,7 @@ aos wait --for handoff --to me --timeout 3600   # block until it's your turn; pr
 ```
 You appear in claims and the log as `user@host/<agent>:<session>` (for example `ada@laptop/claude-code:4c658885`), so two agents on one computer are different people to each other: a claim made in another session blocks you too. `--as NAME` or `$AOS_AS` sets it by hand.
 
-Nothing syncs by itself: files move only on `aos push` and `aos pull`. Don't create background jobs for syncing (LaunchAgents, cron, `nohup` loops, `*sync*.sh` scripts); macOS flags them as items from an unidentified developer and the person didn't ask for them. If they want it automatic, tell them it isn't built yet, and push when work is done.
+Files move on `aos push` and `aos pull`. If the person wants it automatic, use `aos sync` (foreground) or `aos sync --background` (macOS; it explains the "Background Items Added" notice first, and `aos sync --stop` turns it off). Never write your own sync job (LaunchAgents, cron, `nohup` loops, `*sync*.sh` scripts): macOS flags those as items from an unidentified developer.
 
 Pull never overwrites your edits: their copy lands next to yours as `<file>.theirs` (exit 1). Read both, merge by hand, delete the `.theirs`, then push.
 
