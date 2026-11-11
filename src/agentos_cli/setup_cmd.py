@@ -131,9 +131,6 @@ def build_plan(c: Choices, force: bool, client=None, ws_cache: dict | None = Non
     p = Plan(compression=c.compression)
     if c.mcp:
         for a in c.agents:
-            if a.mcp_format == "link":
-                p.links.append(A.claude_connector_link())
-                continue
             try:
                 ch = A.plan_mcp_add(a, force=force)
             except (FileExistsError, ValueError) as e:
@@ -170,42 +167,64 @@ def _names(items, n=4) -> str:
     return ", ".join(items[:n]) + (f" and {len(items) - n} more" if len(items) > n else "")
 
 
+def _agent_skill_counts(p: Plan) -> dict[str, int]:
+    """Agent name -> AgentOS skills it gets in this run (shared folders count for each agent)."""
+    out: dict[str, int] = {}
+    for sk, base, users, status, dest in p.skills:
+        if status in ("new", "update"):
+            for u in users:
+                out[u] = out.get(u, 0) + 1
+    return out
+
+
+def _skill_names(p: Plan) -> list[str]:
+    return sorted({(x[4].name if x[4] else x[0].name) for x in p.skills if x[3] in ("new", "update")})
+
+
 def render(p: Plan, c: Choices, signed: bool, skipped_claude: bool) -> bool:
-    """Print the few-line summary. Returns True when there's anything to do."""
-    rows = []
-    if not signed and (c.upload or c.ws_slugs):
-        rows.append(("Sign you in to AgentOS", "in your browser, once"))
-    if p.changes or p.links:
-        who = [A.BY_ID[ch.agent].name for ch in p.changes] + (["Claude desktop"] if p.links else [])
-        rows.append((f"Add AgentOS to {_names(who)}", "backed up first · each agent signs in once"))
-    new_sk = [x for x in p.skills if x[3] in ("new", "update")]
-    if new_sk:
-        names = sorted({(x[4].name if x[4] else x[0].name) for x in new_sk})
-        dirs = sorted({ui.short(x[1]) for x in new_sk})
-        rows.append((f"Install {len(names)} AgentOS skill{'s' * (len(names) != 1)}", " and ".join(dirs)))
-    if p.uploads:
-        rows.append((f"Add {len(p.uploads)} of your skills to your workspace", _names(s["name"] for s in p.uploads)))
-    elif p.upload_pending:
-        rows.append(("Add your skills to your workspace", f"{p.upload_pending} picked; ones already there are skipped"))
-    if p.compression:
-        rows.append(("Turn on compression", "fewer tokens from tool output, via agentos-capture"))
+    """One line per agent saying exactly what it gets. Returns True when there's anything to do."""
     from rich.table import Table
-    t = Table.grid(padding=(0, 2))
+    t = Table.grid(padding=(0, 3))
     t.add_column(no_wrap=True)
-    t.add_column(style="dim")
-    for what, detail in rows:
-        t.add_row(f"[green]✓[/] {what}", detail)
-    done = [A.BY_ID[a.id].name for a in c.agents if c.mcp and A.mcp_status(a) == "ours"]
-    if done:
-        t.add_row(f"[dim]·[/] [dim]Already set up: {_names(done)}[/]", "")
-    if skipped_claude:
-        t.add_row("[dim]·[/] [dim]Claude Code skipped: OpenBot shares its settings here[/]", "[dim]Customize to include it[/]")
-    for n in p.notes:
-        t.add_row(f"[yellow]![/] {n}", "")
-    if rows:
-        ui.console.print("[bold]This will[/]")
+    t.add_column()
+    t.add_column(style="dim", overflow="fold")
+    changes = {ch.agent: ch for ch in p.changes}
+    counts = _agent_skill_counts(p)
+    anything = False
+    for a in c.agents:
+        what = []
+        if a.id in changes:
+            what.append("add the AgentOS server" + (" (through Node)" if a.id == "claude-desktop" else ""))
+        elif c.mcp and A.mcp_status(a) == "ours":
+            what.append("[dim]AgentOS server already added[/]")
+        n = counts.get(a.name, 0)
+        if n:
+            what.append(f"{n} AgentOS skill{'s' * (n != 1)}")
+        real = a.id in changes or n
+        anything = anything or bool(real)
+        where = ui.short(changes[a.id].path) if a.id in changes else ""
+        t.add_row(("[green]+[/] " if real else "[dim]·[/] ") + a.name, " · ".join(what) or "[dim]nothing to do[/]", where)
+    if p.uploads or p.upload_pending:
+        n = len(p.uploads) or p.upload_pending
+        t.add_row("[green]+[/] Your workspace", f"add {n} of your skills", _names((s["name"] for s in p.uploads), 3))
+        anything = True
+    if p.compression:
+        t.add_row("[green]+[/] Compression", "turn on", "fewer tokens from tool output (agentos-capture)")
+        anything = True
+    if not signed and (c.upload or c.ws_slugs):
+        t.add_row("[green]+[/] Sign in", "in your browser, once", "")
+    ui.console.print("[bold]Setup will[/]")
     ui.console.print(t)
-    return bool(rows)
+    names = _skill_names(p)
+    if names:
+        ui.dim(f"  Skills: {', '.join(names)}")
+    if p.changes:
+        ui.dim("  Each file is backed up first; `aos setup --undo` puts them back.")
+    if skipped_claude:
+        ui.dim("  Claude Code skipped: OpenBot shares its settings on this computer (Customize to include it).")
+    for n in p.notes:
+        ui.warn(n)
+    return anything
 
 
 # ---------------------------------------------------------------- customize
@@ -369,33 +388,49 @@ def run(args) -> int:
 
     stamp = time.strftime("%Y%m%d-%H%M%S")
     rec = {"at": stamp, "mcp": [], "skills": [], "uploaded": []}
-    added = []
-    for ch in plan.changes:
-        try:
-            r = _apply_change(ch, stamp, lambda ch=ch: A.plan_mcp_add(A.BY_ID[ch.agent], force=args.force))
-            rec["mcp"].append(r)
-            added.append(A.BY_ID[ch.agent].name)
-        except Exception as e:
-            ui.fail(f"{A.BY_ID[ch.agent].name}: couldn't write {ui.short(ch.path)} ({e})")
-    if added:
-        ui.ok(f"AgentOS added to {_names(added, 6)}  [dim]backups in {ui.short(paths.backups_dir() / stamp)}[/]")
-
-    installed, held = set(), []
-    for sk, base, users, status, dest in plan.skills:
-        if status not in ("new", "update"):
-            if status in ("edited", "clash"):
-                held.append(f"{sk.name} ({'you edited it' if status == 'edited' else 'name taken'})")
-            continue
-        try:
-            st, d = S.install(sk, base, args.force)
-            if st in ("new", "update"):
-                rec["skills"].append({"path": str(d), "source": sk.source, "id": sk.id})
-                installed.add(d.name)
-        except Exception as e:
-            ui.fail(f"skill {sk.name}: {e}")
-    if installed:
-        dirs = sorted({ui.short(Path(x["path"]).parent) for x in rec["skills"]})
-        ui.ok(f"{len(installed)} skills installed  [dim]{' and '.join(dirs)}[/]")
+    result: dict[str, list[str]] = {x.name: [] for x in c.agents}
+    errors: dict[str, str] = {}
+    files: dict[str, str] = {}
+    with ui.console.status("Setting up your agents…", spinner="dots"):
+        for ch in plan.changes:
+            name = A.BY_ID[ch.agent].name
+            try:
+                r = _apply_change(ch, stamp, lambda ch=ch: A.plan_mcp_add(A.BY_ID[ch.agent], force=args.force))
+                rec["mcp"].append(r)
+                result[name].append("AgentOS server added")
+                files[name] = ui.short(ch.path)
+            except Exception as e:
+                errors[name] = f"couldn't write {ui.short(ch.path)} ({e})"
+        held = []
+        got: dict[str, int] = {}
+        for sk, base, users, status, dest in plan.skills:
+            if status not in ("new", "update"):
+                if status in ("edited", "clash"):
+                    held.append(f"{sk.name} ({'you edited it' if status == 'edited' else 'name taken'})")
+                continue
+            try:
+                st, d = S.install(sk, base, args.force)
+                if st in ("new", "update"):
+                    rec["skills"].append({"path": str(d), "source": sk.source, "id": sk.id})
+                    for u in users:
+                        got[u] = got.get(u, 0) + 1
+            except Exception as e:
+                ui.fail(f"skill {sk.name}: {e}")
+    for name, n in got.items():
+        result.setdefault(name, []).append(f"{n} skill{'s' * (n != 1)}")
+    from rich.table import Table
+    t = Table.grid(padding=(0, 3))
+    t.add_column(no_wrap=True)
+    t.add_column()
+    t.add_column(style="dim")
+    for name, parts in result.items():
+        if name in errors:
+            t.add_row(f"[red]✕[/] {name}", errors[name], "")
+        elif parts:
+            t.add_row(f"[green]✓[/] {name}", " · ".join(parts), files.get(name, ""))
+    ui.console.print(t)
+    if rec["mcp"]:
+        ui.dim(f"  Backups: {ui.short(paths.backups_dir() / stamp)}")
     if held:
         ui.dim(f"  Left alone: {_names(held)}")
 
@@ -413,11 +448,6 @@ def run(args) -> int:
         if failed:
             ui.warn(f"Couldn't upload {_names(failed)}")
     _record(rec)
-
-    for link in plan.links:
-        if inter:
-            webbrowser.open(link)
-        ui.ok(f"Claude desktop: {'opened' if inter else 'open'} the AgentOS connector page  [dim]{link[:60]}…[/]")
 
     if plan.compression:
         exe = shutil.which("agentos-capture")
