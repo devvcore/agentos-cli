@@ -104,7 +104,7 @@ def workspace_list(client, include_untitled: bool = False) -> list[dict]:
     "Untitled skill" are left out unless include_untitled."""
     out, cursor = [], None
     for _ in range(50):
-        args = {"cursor": cursor} if cursor else {}
+        args = {"limit": 50, **({"cursor": cursor} if cursor else {})}
         res = call_tool(client, "skills_list", args)
         for s in (res or {}).get("skills", []):
             if s.get("slug") and (include_untitled or not UNTITLED.match(s.get("name") or "")):
