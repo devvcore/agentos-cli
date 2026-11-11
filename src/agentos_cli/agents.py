@@ -92,8 +92,8 @@ AGENTS: list[Agent] = [
           lambda: _app_support("Code", "User") / "mcp.json", None,
           "In VS Code run 'MCP: List Servers', pick agentos, then Start."),
     Agent("claude-desktop", "Claude desktop", [lambda: _app_support("Claude"), lambda: Path("/Applications/Claude.app")],
-          [], "link", None, None,
-          "Claude desktop adds connectors in the app: `aos setup` opens the AgentOS connector page for you."),
+          [], "claude_desktop_json", lambda: _app_support("Claude") / "claude_desktop_config.json", None,
+          "Quit Claude (⌘Q) and open it again; it opens the AgentOS sign-in in your browser."),
 ]
 
 BY_ID = {a.id: a for a in AGENTS}
@@ -123,7 +123,43 @@ def claude_connector_link(url: str | None = None) -> str:
 
 # ---------------------------------------------------------------- JSON configs
 
+BRIDGE_PKG = "mcp-remote@0.16"   # Claude desktop reads only local (stdio) servers from its config
+
+
+class NeedsNode(ValueError):
+    pass
+
+
+_BRIDGE: list = []
+
+
+def bridge_npx() -> str | None:
+    """Absolute path to npx when Node 18+ is installed. Absolute, because Claude desktop
+    starts servers with a minimal PATH that often lacks Homebrew, nvm or Volta."""
+    if _BRIDGE:
+        return _BRIDGE[0]
+    npx = shutil.which("npx")
+    ok = None
+    if npx:
+        node = os.path.join(os.path.dirname(npx), "node")
+        node = node if os.path.exists(node) else shutil.which("node")
+        try:
+            import subprocess
+            v = subprocess.run([node, "--version"], capture_output=True, text=True, timeout=5).stdout.strip()
+            ok = npx if int(v.lstrip("v").split(".")[0]) >= 18 else None
+        except Exception:
+            ok = None
+    _BRIDGE.append(ok)
+    return ok
+
+
 def _entry(fmt: str, url: str) -> dict:
+    if fmt == "claude_desktop_json":
+        npx = bridge_npx()
+        if not npx:
+            raise NeedsNode("Claude desktop: needs Node.js 18+ to connect from its config. Install Node, or in Claude open "
+                            f"Settings → Connectors → Add custom connector and paste {url}")
+        return {"command": npx, "args": ["-y", BRIDGE_PKG, url]}
     return {
         "claude_json": {"type": "http", "url": url},
         "opencode_json": {"type": "remote", "url": url, "enabled": True},
@@ -135,7 +171,15 @@ def _entry(fmt: str, url: str) -> dict:
 
 
 _KEY = {"claude_json": ("mcpServers",), "opencode_json": ("mcp",), "cursor_json": ("mcpServers",),
-        "gemini_json": ("mcpServers",), "windsurf_json": ("mcpServers",), "vscode_json": ("servers",)}
+        "gemini_json": ("mcpServers",), "windsurf_json": ("mcpServers",), "vscode_json": ("servers",),
+        "claude_desktop_json": ("mcpServers",)}
+
+
+def _is_ours(fmt: str, cur: Any, url: str) -> bool:
+    if fmt == "claude_desktop_json":  # the npx path may differ between machines and runs
+        args = cur.get("args") if isinstance(cur, dict) else None
+        return isinstance(args, list) and url in args and any(str(a).startswith("mcp-remote") for a in args)
+    return cur == _entry(fmt, url)
 
 
 def _load_json(text: str | None, path: Path) -> dict:
@@ -186,7 +230,7 @@ def mcp_status(agent: Agent, url: str | None = None) -> str:
     cur = _dig(d, _KEY[agent.mcp_format]).get(NAME) if isinstance(_dig(d, _KEY[agent.mcp_format]), dict) else None
     if cur is None:
         return "absent"
-    return "ours" if cur == _entry(agent.mcp_format, url) else "custom"
+    return "ours" if _is_ours(agent.mcp_format, cur, url) else "custom"
 
 
 def _dig(d: dict, keys: tuple) -> Any:

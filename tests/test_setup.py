@@ -225,3 +225,38 @@ def test_yes_without_upload_flag_never_adds_skills(home, monkeypatch):
     ws = _signed_in_ws(home, monkeypatch)
     assert setup() == 0
     assert ws.created == []
+
+
+def _desktop(home):
+    from agentos_cli import agents as A
+    d = A.BY_ID["claude-desktop"]
+    d.markers[0]().mkdir(parents=True, exist_ok=True)
+    return A, d
+
+
+def test_claude_desktop_gets_the_server_in_its_config(home, monkeypatch):
+    A, d = _desktop(home)
+    monkeypatch.setattr(A, "bridge_npx", lambda: "/opt/node/bin/npx")
+    opened = []
+    monkeypatch.setattr("webbrowser.open", lambda *a: opened.append(a))
+    assert setup("--agents", "claude-desktop") == 0
+    cfg = json.loads(d.mcp_file().read_text())
+    assert cfg["mcpServers"]["agentos"] == {"command": "/opt/node/bin/npx",
+                                            "args": ["-y", "mcp-remote@0.16", "https://tryagentos.net/api/mcp"]}
+    assert A.mcp_status(d) == "ours" and opened == []
+    monkeypatch.setattr(A, "bridge_npx", lambda: "/usr/local/bin/npx")  # another Node: still ours
+    assert A.mcp_status(d) == "ours"
+    assert cli.main(["setup", "--yes", "--undo", "--agents", "claude-desktop"]) == 0
+    assert "agentos" not in json.loads(d.mcp_file().read_text())["mcpServers"]
+
+
+def test_claude_desktop_without_node_says_how_and_opens_nothing(home, monkeypatch, capsys):
+    A, d = _desktop(home)
+    monkeypatch.setattr(A, "bridge_npx", lambda: None)
+    opened = []
+    monkeypatch.setattr("webbrowser.open", lambda *a: opened.append(a))
+    assert setup("--agents", "claude-desktop,codex") == 0
+    out = capsys.readouterr().out
+    assert "Node.js 18+" in out and "Add custom connector" in out
+    assert not d.mcp_file().exists() and opened == []
+    assert "agentos" in (home / ".codex" / "config.toml").read_text()
