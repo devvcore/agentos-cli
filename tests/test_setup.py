@@ -176,3 +176,52 @@ def test_many_skills_upload_in_parallel(home, monkeypatch):
     assert setup("--upload", "--skills", "none", "--no-mcp") == 0
     assert len(ws.created) == 40
     assert _t.time() - t0 < 2.0  # 40 x 0.1 s one by one would be 4 s
+
+
+def _answers(monkeypatch, selects, checkboxes=()):
+    """Drive setup's prompts: questionary.select / checkbox answer from these queues."""
+    import questionary
+    from agentos_cli import setup_cmd, ui
+    sel, chk = list(selects), list(checkboxes)
+
+    class A:
+        def __init__(self, v):
+            self.v = v
+
+        def ask(self):
+            return self.v
+    monkeypatch.setattr(questionary, "select", lambda *a, **k: A(sel.pop(0)))
+    monkeypatch.setattr(questionary, "checkbox", lambda *a, **k: A(chk.pop(0)))
+    monkeypatch.setattr(ui, "interactive", lambda: True)
+    monkeypatch.setattr(setup_cmd.webbrowser, "open", lambda *a: None)
+
+
+def _signed_in_ws(home, monkeypatch, existing=()):
+    from agentos_cli import setup_cmd
+    for n in ("alpha", "beta", "gamma"):
+        _skill(home / ".claude" / "skills", n)
+    ws = FakeWorkspace(list(existing))
+    monkeypatch.setenv("AGENTOS_PAT", "t")
+    monkeypatch.setattr(setup_cmd, "_client", lambda: ws)
+    return ws
+
+
+def test_setup_asks_before_adding_skills_and_not_now_adds_none(home, monkeypatch):
+    ws = _signed_in_ws(home, monkeypatch)
+    _answers(monkeypatch, ["Not now", "Set up"])
+    assert cli.main(["setup"]) == 0
+    assert ws.created == []
+    assert "agentos" in (home / ".codex" / "config.toml").read_text()  # the rest still ran
+
+
+def test_setup_choose_which_adds_only_those(home, monkeypatch):
+    ws = _signed_in_ws(home, monkeypatch, existing=["gamma"])
+    _answers(monkeypatch, ["Choose which…", "Set up"], [["beta"]])
+    assert cli.main(["setup"]) == 0
+    assert [c["name"] for c in ws.created] == ["beta"]
+
+
+def test_yes_without_upload_flag_never_adds_skills(home, monkeypatch):
+    ws = _signed_in_ws(home, monkeypatch)
+    assert setup() == 0
+    assert ws.created == []
