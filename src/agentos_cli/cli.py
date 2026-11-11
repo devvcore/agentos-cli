@@ -35,6 +35,7 @@ HELP = [
     ]),
     ("Spaces", [
         ("link · status · pull · push", "share a folder as a space with versions"),
+        ("sync [--background]", "push and pull for you as you work (aos help sync)"),
         ("diff · restore · log", "see and undo changes"),
         ("resolve <file>", "after a pull conflict: mark the file merged so push works again"),
         ("claim · release · handoff", "coordinate with people and other agents"),
@@ -498,7 +499,11 @@ def status_overview(as_json: bool) -> dict:
     info["folder"] = None
     if root:
         st = spaces.load_state(root)
-        info["folder"] = {"path": str(root), "space": st.get("space"), "version": st.get("version")}
+        from . import sync
+        info["folder"] = {"path": str(root), "space": st.get("space"), "version": st.get("version"),
+                          "sync": sync.background_status(root) or "off"}
+    from . import sync as _sync
+    info["background_sync"] = _sync.all_background()
     if as_json:
         return info
     ui.header("aos status", paths.base_url())
@@ -521,8 +526,16 @@ def status_overview(as_json: bool) -> dict:
         t.add_row("Agents", "[dim]no coding agents found[/]")
     t.add_row("Capture", {"ok": "[green]✓[/] ", "warn": "[yellow]![/] ", "dim": "[dim]·[/] "}[level] + msg.split(": ", 1)[-1])
     f = info["folder"]
-    t.add_row("This folder", f"linked to space [bold]{f['space']}[/] (v{f['version']}) · syncs when you run `aos push` / `aos pull`"
-              if f else "[dim]not linked to a space (`aos help spaces`)[/]")
+    if f:
+        how = ("[green]✓[/] background sync running" if f["sync"] == "running"
+               else "[yellow]![/] background sync stopped (see .aos/sync.log)" if f["sync"] == "stopped"
+               else "syncs on `aos push` / `aos pull`, or `aos sync`")
+        t.add_row("This folder", f"linked to space [bold]{f['space']}[/] (v{f['version']}) · {how}")
+    else:
+        t.add_row("This folder", "[dim]not linked to a space (`aos help spaces`)[/]")
+    for b in info["background_sync"]:
+        if not f or b["folder"] != f["path"]:
+            t.add_row("Sync", f"background sync {b['state']}: {ui.short(b['folder'])}")
     ui.console.print(t)
     if any(g["mcp"] == "absent" for g in ags) or not si:
         ui.dim("  Run `aos setup` to add what's missing.")
@@ -693,6 +706,9 @@ def main(argv=None) -> int:
         i += 1 if "=" in argv[i] else 2
     verb = argv[i] if i < len(argv) else None
 
+    if verb == "sync":
+        from . import sync
+        return _friendly(lambda: sync.main(argv[i + 1:]))
     from . import spaces
     if verb == "status":
         rest = argv[i + 1:]
