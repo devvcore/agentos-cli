@@ -158,9 +158,19 @@ def cmd_whoami(a) -> int:
 
 def _auth_info(src: str) -> dict:
     login = (auth.load_login() or {}) if src == "aos login" else {}
+    if src == "aos login" and not login.get("workspace_id"):
+        # Older token responses didn't name the workspace; ask once and keep it with the login.
+        try:
+            from .work import connect, call
+            who = (call(connect(timeout=15), "workspace_map", {}) or {}).get("connected_as") or {}
+            login = auth.update_login(workspace_id=who.get("workspace_id"), workspace=who.get("workspace"),
+                                      user=who.get("user")) or login
+        except Exception:  # noqa: BLE001 -- the token is still good without the name
+            pass
     exp = login.get("expires_at")
     return {"signed_in": True, "source": src, "server": paths.base_url(), "api_url": paths.api_url(),
-            "workspace_id": login.get("workspace_id"), "user_id": login.get("user_id"),
+            "workspace_id": login.get("workspace_id"), "workspace": login.get("workspace"),
+            "user_id": login.get("user_id"), "user": login.get("user"),
             "scope": login.get("scope"), "expires_at": int(exp) if exp else None}
 
 
@@ -183,7 +193,7 @@ def cmd_auth(a) -> int:
         print(json.dumps(info))
         return 0
     left = f" · token good for {max(0, int((info['expires_at'] - time.time()) / 60))} min, refreshes itself" if info["expires_at"] else ""
-    ui.ok(f"Signed in ({src}) to workspace {info['workspace_id'] or '?'}{left}")
+    ui.ok(f"Signed in ({src}) as {info.get('user') or '?'} to {info.get('workspace') or info['workspace_id'] or '?'}{left}")
     if info["scope"]:
         ui.dim(f"  scopes: {info['scope']}")
     return 0
