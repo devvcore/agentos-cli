@@ -105,6 +105,9 @@ def openbot_shares_claude() -> bool:
     entry there reaches all of them, not just the person's own Claude Code."""
     if os.environ.get("CLAUDE_CONFIG_DIR"):
         return False
+    # Run by an OpenBot agent, or OpenBot installed here.
+    if os.environ.get("OPENBOT_AGENT_PROCESS") or os.environ.get("CLAUDE_CODE_ENTRYPOINT") == "openbot":
+        return True
     return any(p.exists() for p in (H() / "Library" / "Application Support" / "OpenBot", H() / ".config" / "OpenBot"))
 
 

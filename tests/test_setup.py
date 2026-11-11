@@ -140,3 +140,12 @@ def test_untitled_drafts_are_hidden():
                                {"slug": "gmail", "name": "Gmail body", "description": "d"}], "next_cursor": None}
     assert [s["slug"] for s in S.workspace_list(C())] == ["gmail"]
     assert len(S.workspace_list(C(), include_untitled=True)) == 2
+
+
+def test_running_inside_an_openbot_agent_skips_claude_code(home, monkeypatch):
+    monkeypatch.setenv("OPENBOT_AGENT_PROCESS", "1")
+    assert setup() == 0
+    assert "agentos" not in json.loads((home / ".claude.json").read_text())["mcpServers"]
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(home / ".claude"))  # its own config: not shared
+    from agentos_cli import agents as A
+    assert A.openbot_shares_claude() is False
