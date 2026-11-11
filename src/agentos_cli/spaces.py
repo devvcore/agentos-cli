@@ -48,6 +48,7 @@ import sys
 import tempfile
 import time
 import zipfile
+from contextlib import contextmanager
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -287,9 +288,12 @@ class Space:
         return lo
 
     # ---- objects
-    def put_objects(self, items: dict) -> int:
-        """Upload {sha: path or bytes}; skips what the space already has. Returns how many were sent."""
+    def put_objects(self, items: dict, step=None) -> int:
+        """Upload {sha: path or bytes}; skips what the space already has. Returns how many were sent.
+        `step()` is called once per item (a progress bar's advance); already-cached ones count at once."""
         todo = [(sha, src) for sha, src in items.items() if self.cache.get_object(sha) is None]
+        for _ in range(len(items) - len(todo)):
+            step and step()
 
         def one(item):
             sha, src = item
@@ -302,11 +306,12 @@ class Space:
                 self.r.write_blob(self.object_path(sha), text)
                 sent = True
             self.cache.put_object(sha, data)
+            step and step()
             return sent
 
         return sum(self.r.map(one, todo))
 
-    def get_objects(self, shas) -> dict:
+    def get_objects(self, shas, step=None) -> dict:
         out, todo = {}, []
         for sha in dict.fromkeys(shas):
             data = self.cache.get_object(sha)
@@ -314,12 +319,14 @@ class Space:
                 todo.append(sha)
             else:
                 out[sha] = data
+                step and step()
 
         def one(sha):
             data = gzip.decompress(base64.b64decode(self.r.read_blob(self.object_path(sha))))
             if hashlib.sha256(data).hexdigest() != sha:
                 raise RuntimeError(f"object {sha[:12]} failed its checksum")
             self.cache.put_object(sha, data)
+            step and step()
             return sha, data
 
         out.update(dict(self.r.map(one, todo)))
@@ -680,9 +687,67 @@ def version_or_exit(sp, n, head=None):
     return sp.version(n)
 
 
-def _progress(msg):
-    if sys.stderr.isatty():
-        print(msg, file=sys.stderr, flush=True)
+PROGRESS_MIN = 5
+
+
+@contextmanager
+def _bar(label: str, total: int):
+    """A transient n/total progress bar on stderr, for a person at a terminal and more than
+    PROGRESS_MIN items. Yields step(); a no-op otherwise, so agents and pipes see nothing extra."""
+    if total <= PROGRESS_MIN or not sys.stderr.isatty():
+        yield lambda: None
+        return
+    from rich.progress import BarColumn, MofNCompleteColumn, Progress, TextColumn, TimeElapsedColumn
+    from . import ui
+    cols = (TextColumn(f"  {label}"), BarColumn(bar_width=30), MofNCompleteColumn(), TimeElapsedColumn())
+    with Progress(*cols, console=ui.err, transient=True) as bar:
+        task = bar.add_task(label, total=total)
+        yield lambda: bar.advance(task)
+
+
+class _Waiting:
+    """A spinner on stderr while wait/watch block: what, which space, how long (terminal only)."""
+
+    def __init__(self, what: str):
+        self.what, self.t0, self.status = what, time.time(), None
+        if sys.stderr.isatty():
+            from . import ui
+            self.status = ui.err.status(self._text(), spinner="dots")
+            self.status.start()
+
+    def _text(self):
+        secs = int(time.time() - self.t0)
+        took = f"{secs // 60}m {secs % 60:02d}s" if secs >= 60 else f"{secs}s"
+        return f"{self.what} · {took} (Ctrl-C to stop)"
+
+    def tick(self):
+        if self.status:
+            self.status.update(self._text())
+
+    def pause(self):
+        if self.status:
+            self.status.stop()
+
+    def resume(self):
+        if self.status:
+            self.status.start()
+
+    def done(self):
+        if self.status:
+            self.status.stop()
+            self.status = None
+
+
+def _wait_label(a, space: str, forever: bool) -> str:
+    kinds = {"push": "a push", "claim": "a claim", "release": "a release", "handoff": "a handoff"}
+    what = kinds.get(a.for_, "a push, claim, release or handoff")
+    if a.from_:
+        what += f" from {a.from_}"
+    if a.to:
+        what += f" to {a.to}"
+    if a.path:
+        what += f" touching {a.path}"
+    return f"{'Watching for' if forever else 'Waiting for'} {what} in '{space}'"
 
 
 # ---------------------------------------------------------------- verbs
@@ -787,9 +852,8 @@ def cmd_push(a):
         print("aos: nothing pushed. Ask them to release it, or pass --force.", file=sys.stderr)
         return 3
     todo = {local[rel]: src / rel for rel in added + changed}
-    if len(todo) > 20:
-        _progress(f"Uploading {len(todo)} files…")
-    uploaded = sp.put_objects(todo)
+    with _bar(f"Uploading {len(todo)} files to '{st['space']}'", len(todo)) as step:
+        uploaded = sp.put_objects(todo, step)
     rec = sp.commit(head, me, a.message or "(no message)", local)
     if rec is None:
         raise SystemExit("aos: someone pushed at the same moment. Run `aos pull`, then push again.")
@@ -816,9 +880,9 @@ def cmd_pull(a):
     local = scan(root)
     added, changed, removed = tree_diff(base, theirs)
     want = [rel for rel in added + changed if local.get(rel) != theirs[rel]]
-    if len(want) > 20:
-        _progress(f"Downloading {len(want)} files…")
-    blobs = sp.get_objects(theirs[rel] for rel in want)
+    shas = list(dict.fromkeys(theirs[rel] for rel in want))
+    with _bar(f"Downloading {len(shas)} files from '{st['space']}'", len(shas)) as step:
+        blobs = sp.get_objects(shas, step)
     conflicts, fetched = [], 0
     for rel in want:
         p = root / rel
@@ -1022,19 +1086,29 @@ def cmd_wait(a, forever=False):
     me = whoami(a)
     seen_v, seen_e = sp.sync()
     deadline = time.time() + a.timeout if a.timeout else None
-    while True:
-        if deadline and time.time() >= deadline:
-            print("aos: timed out waiting", file=sys.stderr)
-            return 4
-        time.sleep(a.interval if not deadline else max(0.0, min(a.interval, deadline - time.time())))
-        head, last = sp.sync()
-        new = [_push_event(sp, n) for n in range(seen_v + 1, head + 1)] + sp.events(seen_e, last)
-        seen_v, seen_e = max(seen_v, head), max(seen_e, last)
-        for ev in new:
-            if _matches(ev, a, me):
-                print(json.dumps(ev, sort_keys=True), flush=True)
-                if not forever:
-                    return 0
+    spin = _Waiting(_wait_label(a, st["space"], forever))
+    try:
+        while True:
+            if deadline and time.time() >= deadline:
+                spin.done()
+                print("aos: timed out waiting", file=sys.stderr)
+                return 4
+            end = time.time() + (a.interval if not deadline else max(0.0, min(a.interval, deadline - time.time())))
+            while time.time() < end:  # sleep in short steps so the elapsed time stays current
+                time.sleep(min(0.5, max(0.0, end - time.time())))
+                spin.tick()
+            head, last = sp.sync()
+            new = [_push_event(sp, n) for n in range(seen_v + 1, head + 1)] + sp.events(seen_e, last)
+            seen_v, seen_e = max(seen_v, head), max(seen_e, last)
+            for ev in new:
+                if _matches(ev, a, me):
+                    spin.pause()
+                    print(json.dumps(ev, sort_keys=True), flush=True)
+                    if not forever:
+                        return 0
+                    spin.resume()
+    finally:
+        spin.done()
 
 
 # ---------------------------------------------------------------- cli
