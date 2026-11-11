@@ -48,7 +48,8 @@ else
   TAG="${AOS_VERSION:-}"
   if [ -z "$TAG" ]; then
     # /releases/latest redirects to /releases/tag/<tag>; no API token or rate limit.
-    TAG="$(curl -fsSI "https://github.com/$REPO/releases/latest" | tr -d '\r' | sed -n 's#^[Ll]ocation: .*/releases/tag/\(.*\)$#\1#p' | tail -n1)"
+    # The query string skips GitHub's cached redirect, which lags a new release.
+    TAG="$(curl -fsSI "https://github.com/$REPO/releases/latest?ts=$(date +%s)" | tr -d '\r' | sed -n 's#^[Ll]ocation: .*/releases/tag/\(.*\)$#\1#p' | tail -n1)"
   fi
   if [ -z "$TAG" ]; then
     SOURCE="git+https://github.com/$REPO"
