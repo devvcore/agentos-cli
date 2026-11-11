@@ -191,3 +191,39 @@ def test_handoff_releases_my_claims_and_wait_sees_it(fs, tmp_path, monkeypatch, 
     assert run(monkeypatch, b, "claim", "one", who="bob") == 0
     kinds = [json.loads(v)["kind"] for k, v in sorted(fs.files.items()) if "/events/e" in k]
     assert kinds == ["claim", "claim", "release", "release", "handoff", "claim"]
+
+
+def test_progress_steps_once_per_object_and_is_silent_without_a_terminal(fs, tmp_path, monkeypatch, capsys):
+    a, b = two_folders(tmp_path, monkeypatch)
+    for i in range(8):
+        (a / f"f{i}.txt").write_text(str(i))
+    steps = []
+    real_bar = spaces._bar
+
+    def counting_bar(label, total):
+        steps.append(("start", label, total))
+        return real_bar(label, total)
+
+    monkeypatch.setattr(spaces, "_bar", counting_bar)
+    sp_put = spaces.Space.put_objects
+
+    def put(self, items, step=None):
+        calls = []
+        n = sp_put(self, items, lambda: calls.append(1))
+        steps.append(("steps", len(calls)))
+        return n
+
+    monkeypatch.setattr(spaces.Space, "put_objects", put)
+    assert run(monkeypatch, a, "push") == 0
+    assert ("steps", 8) in steps and steps[0][2] == 8 and "Uploading 8 files" in steps[0][1]
+    assert "Uploading" not in capsys.readouterr().err  # not a terminal: no bar
+    assert run(monkeypatch, b, "pull") == 0
+    assert any(s[0] == "start" and s[1].startswith("Downloading 8 files") for s in steps)
+
+
+def test_wait_label_says_what_and_where():
+    import argparse
+    a = argparse.Namespace(for_="handoff", from_="alice", to=None, path=None)
+    assert spaces._wait_label(a, "deck", False) == "Waiting for a handoff from alice in 'deck'"
+    a = argparse.Namespace(for_=None, from_=None, to=None, path="src/")
+    assert spaces._wait_label(a, "deck", True).startswith("Watching for a push, claim, release or handoff touching src/")
