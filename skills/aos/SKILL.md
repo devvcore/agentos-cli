@@ -9,6 +9,8 @@ description: "Use the aos command line to work in AgentOS from this computer: lo
 
 Output is JSON when piped, so parse it instead of scraping text. Exit codes: 0 ok, 1 error, 2 waiting for a human approval (not done), 3 someone else has claimed it, 4 timed out.
 
+`aos status` shows sign-in, which agents have AgentOS, capture and this folder's space in one view; `aos help <topic>` (overview, setup, mcp, skills, spaces, capture, secrets) explains each part. Capture (compression and work capture) is a separate private-preview tool: don't try to install it.
+
 ## Find things and call tools
 ```sh
 aos context "Acme renewal"                 # people, companies, Projects, history
@@ -45,6 +47,8 @@ aos handoff -m "tests next" --to bob # releases your claims, leaves a note
 aos wait --for handoff --to me --timeout 3600   # block until it's your turn; prints the event JSON
 ```
 You appear in claims and the log as `user@host/<agent>:<session>` (for example `ada@laptop/claude-code:4c658885`), so two agents on one computer are different people to each other: a claim made in another session blocks you too. `--as NAME` or `$AOS_AS` sets it by hand.
+
+Nothing syncs by itself: files move only on `aos push` and `aos pull`. Don't create background jobs for syncing (LaunchAgents, cron, `nohup` loops, `*sync*.sh` scripts); macOS flags them as items from an unidentified developer and the person didn't ask for them. If they want it automatic, tell them it isn't built yet, and push when work is done.
 
 Pull never overwrites your edits: their copy lands next to yours as `<file>.theirs` (exit 1). Read both, merge by hand, delete the `.theirs`, then push.
 

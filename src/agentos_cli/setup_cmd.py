@@ -142,11 +142,14 @@ def build_plan(c: Choices, force: bool, client=None, ws_cache: dict | None = Non
     ws_cache = ws_cache if ws_cache is not None else {}
     if c.ws_slugs and client:
         meta = {w["slug"]: w for w in ws_cache.get("list", [])}
+        status = ui.console.status(f"Fetching {len(c.ws_slugs)} workspace skill(s)…", spinner="dots")
+        status.start()
         for slug in c.ws_slugs:
             try:
                 to_install.append(S.workspace_skill(client, slug, meta.get(slug)))
             except Exception as e:
                 p.notes.append(f"skipped workspace skill {slug} ({type(e).__name__})")
+        status.stop()
     for base, users in S.target_dirs([a.id for a in c.agents]):
         for sk in to_install:
             status, dest = S.plan_install(sk, base, force)
@@ -194,9 +197,9 @@ def render(p: Plan, c: Choices, signed: bool, skipped_claude: bool) -> bool:
     for a in c.agents:
         what = []
         if a.id in changes:
-            what.append("add the AgentOS server" + (" (through Node)" if a.id == "claude-desktop" else ""))
+            what.append("add the AgentOS MCP server" + (" (through Node)" if a.id == "claude-desktop" else ""))
         elif c.mcp and A.mcp_status(a) == "ours":
-            what.append("[dim]AgentOS server already added[/]")
+            what.append("[dim]AgentOS MCP server already added[/]")
         n = counts.get(a.name, 0)
         if n:
             what.append(f"{n} AgentOS skill{'s' * (n != 1)}")
@@ -397,7 +400,7 @@ def run(args) -> int:
             try:
                 r = _apply_change(ch, stamp, lambda ch=ch: A.plan_mcp_add(A.BY_ID[ch.agent], force=args.force))
                 rec["mcp"].append(r)
-                result[name].append("AgentOS server added")
+                result[name].append("AgentOS MCP server added")
                 files[name] = ui.short(ch.path)
             except Exception as e:
                 errors[name] = f"couldn't write {ui.short(ch.path)} ({e})"

@@ -8,6 +8,18 @@ aos setup      # add AgentOS to Claude Code, Codex, Cursor, opencode, Gemini CLI
 
 `aos setup` finds the coding agents on your computer, lets you tick what to add (the AgentOS MCP server, the AgentOS skills, your workspace's skills, compression), shows you the exact change to each config file, backs it up, and applies it. Each agent then signs in to AgentOS once with OAuth; no tokens are written to disk. `aos setup --undo` takes it all out again.
 
+## How the pieces fit
+
+| | What it is | Do you need it? |
+|---|---|---|
+| **MCP server** | `aos setup` adds AgentOS to each coding agent's config so the agent can call AgentOS tools. Each agent signs in once. | Yes |
+| **Skills** | `aos setup` installs the AgentOS skills so agents know how to use AgentOS and `aos`. | Yes |
+| **`aos` command** | You and your agents use AgentOS from the terminal. | Yes |
+| **Spaces** (`aos link`) | Share a folder with people and agents, with versions. Changes move only when you run `aos push` / `aos pull`; there is no background sync. | Only for shared folders |
+| **Capture** | Compression of large tool output, plus learning from your coding sessions. Separate tool, private preview. | No |
+
+`aos status` shows all of it at a glance. `aos help <topic>` explains each part: `overview`, `setup`, `mcp`, `skills`, `spaces`, `capture`, `secrets`, `status`.
+
 ## What you can do with it
 
 | | |
