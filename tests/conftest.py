@@ -26,5 +26,7 @@ def home(tmp_path, monkeypatch):
         monkeypatch.delenv(v, raising=False)
     monkeypatch.delenv("AGENTOS_URL", raising=False)
     monkeypatch.delenv("AGENTOS_MCP_URL", raising=False)
+    for var in ("OPENBOT_AGENT_PROCESS", "CLAUDE_CODE_ENTRYPOINT", "CLAUDE_CONFIG_DIR"):
+        monkeypatch.delenv(var, raising=False)
     monkeypatch.setattr(shutil, "which", lambda *_a, **_k: None)
     return h

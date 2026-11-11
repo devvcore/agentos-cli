@@ -44,6 +44,8 @@ aos push -m "canvas sync works"      # refuses if behind (pull first) or if some
 aos handoff -m "tests next" --to bob # releases your claims, leaves a note
 aos wait --for handoff --to me --timeout 3600   # block until it's your turn; prints the event JSON
 ```
+You appear in claims and the log as `user@host/<agent>:<session>` (for example `ada@laptop/claude-code:4c658885`), so two agents on one computer are different people to each other: a claim made in another session blocks you too. `--as NAME` or `$AOS_AS` sets it by hand.
+
 Pull never overwrites your edits: their copy lands next to yours as `<file>.theirs` (exit 1). Read both, merge by hand, delete the `.theirs`, then push.
 
 ## Skills
