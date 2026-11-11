@@ -259,8 +259,9 @@ def run(args) -> int:
     def load_workspace():
         nonlocal client
         if client is None:
-            client = _client()
-            ws_cache["list"] = S.workspace_list(client)
+            with ui.console.status("Checking your workspace…", spinner="dots"):
+                client = _client()
+                ws_cache["list"] = S.workspace_list(client)
         if skills_flag in ("workspace", "all") and not c.ws_slugs:
             c.ws_slugs = [w["slug"] for w in ws_cache["list"]]
 
@@ -357,14 +358,11 @@ def run(args) -> int:
         ui.dim(f"  Left alone: {_names(held)}")
 
     if plan.uploads and client is not None:
-        up, failed = [], []
-        for s in plan.uploads:
-            try:
-                res = S.push(client, s)
-                (up if not (isinstance(res, dict) and res.get("ok") is False) else failed).append(s["name"])
-            except Exception:
-                failed.append(s["name"])
+        up, failed, stopped = _upload(client, plan.uploads)
         rec["uploaded"] = up
+        if stopped:
+            _record(rec)
+            return 130
         if up:
             extra = sum(1 for s in plan.uploads if s["name"] in up and s["extra_files"] > 0)
             ui.ok(f"Uploaded {len(up)} of your skills to your workspace  [dim]{_names(up)}[/]")
@@ -391,6 +389,42 @@ def run(args) -> int:
 
     _next_steps([a for a in c.agents if a.id in {ch.agent for ch in plan.changes}])
     return 0
+
+
+UPLOAD_WORKERS = 8
+
+
+def _upload(client, todo: list[dict]) -> tuple[list[str], list[str], bool]:
+    """Upload skills in parallel with a progress bar. Ctrl-C stops cleanly: what went
+    up stays up and is reported; nothing half-written (each skill is one insert)."""
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    from rich.progress import BarColumn, MofNCompleteColumn, Progress, TextColumn, TimeElapsedColumn
+    up, failed = [], []
+
+    def one(s):
+        res = S.push(client, s)
+        if isinstance(res, dict) and res.get("ok") is False:
+            raise RuntimeError(res.get("error") or "refused")
+        return s["name"]
+
+    cols = (TextColumn("  Uploading your skills"), BarColumn(bar_width=30), MofNCompleteColumn(), TimeElapsedColumn())
+    pool = ThreadPoolExecutor(max_workers=UPLOAD_WORKERS)
+    try:
+        with Progress(*cols, console=ui.console, transient=True) as bar:
+            task = bar.add_task("upload", total=len(todo))
+            futures = {pool.submit(one, s): s for s in todo}
+            for f in as_completed(futures):
+                try:
+                    up.append(f.result())
+                except Exception:
+                    failed.append(futures[f]["name"])
+                bar.advance(task)
+    except KeyboardInterrupt:
+        pool.shutdown(wait=False, cancel_futures=True)
+        ui.warn(f"Stopped. {len(up)} of {len(todo)} skills were uploaded; run `aos setup` again to finish.")
+        return up, failed, True
+    pool.shutdown(wait=True)
+    return up, failed, False
 
 
 def _next_steps(agents) -> None:

@@ -1,6 +1,6 @@
 [project]
 name = "agentos-cli"
-version = "0.2.3"
+version = "0.2.4"
 description = "aos: the AgentOS CLI. Sign in, set up your coding agents, install skills, and work in AgentOS from the terminal."
 requires-python = ">=3.11"
 readme = "README.md"

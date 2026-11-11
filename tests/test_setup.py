@@ -149,3 +149,30 @@ def test_running_inside_an_openbot_agent_skips_claude_code(home, monkeypatch):
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(home / ".claude"))  # its own config: not shared
     from agentos_cli import agents as A
     assert A.openbot_shares_claude() is False
+
+
+def test_many_skills_upload_in_parallel(home, monkeypatch):
+    import threading
+    import time as _t
+    from agentos_cli import setup_cmd
+
+    class Slow(FakeWorkspace):
+        lock = threading.Lock()
+
+        def call(self, tool, **kw):
+            if kw["name"] == "skills_create":
+                _t.sleep(0.1)
+            if kw["name"] == "skills_list":
+                assert json.loads(kw["arguments"])["limit"] == 50
+            with self.lock:
+                return super().call(tool, **kw)
+
+    for i in range(40):
+        _skill(home / ".claude" / "skills", f"s{i:02d}")
+    ws = Slow([])
+    monkeypatch.setenv("AGENTOS_PAT", "t")
+    monkeypatch.setattr(setup_cmd, "_client", lambda: ws)
+    t0 = _t.time()
+    assert setup("--upload", "--skills", "none", "--no-mcp") == 0
+    assert len(ws.created) == 40
+    assert _t.time() - t0 < 2.0  # 40 x 0.1 s one by one would be 4 s
