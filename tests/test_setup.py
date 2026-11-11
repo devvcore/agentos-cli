@@ -59,3 +59,84 @@ def test_reviewed_file_changed_before_write_is_replanned(home, monkeypatch):
     setup_cmd._apply_change(ch, "t", lambda: A.plan_mcp_add(a))
     d = json.loads((home / ".claude.json").read_text())
     assert d["numStartups"] == 4 and "agentos" in d["mcpServers"]
+
+
+def test_openbot_machine_skips_claude_code_by_default(home):
+    (home / "Library" / "Application Support" / "OpenBot").mkdir(parents=True)
+    assert setup() == 0
+    assert "agentos" not in json.loads((home / ".claude.json").read_text())["mcpServers"]
+    assert "[mcp_servers.agentos]" in (home / ".codex" / "config.toml").read_text()
+    assert setup("--agents", "claude-code") == 0  # asked for by name: included
+    assert "agentos" in json.loads((home / ".claude.json").read_text())["mcpServers"]
+
+
+class FakeWorkspace:
+    server_info = {}
+
+    def __init__(self, existing):
+        self.existing = existing
+        self.created = []
+
+    def initialize(self, client_name=""):
+        pass
+
+    def list_tools(self):
+        return ["workspace_call"]
+
+    def call(self, tool, **kw):
+        name, args = kw["name"], json.loads(kw["arguments"])
+        if name == "skills_list":
+            return {"skills": [{"slug": s, "name": s, "description": ""} for s in self.existing], "next_cursor": None}
+        if name == "skills_create":
+            self.created.append(args)
+            self.existing.append(args["name"])
+            return {"ok": True, "slug": args["name"]}
+        raise AssertionError(name)
+
+
+def _skill(base, name, body="Do the thing.\n", extra=None):
+    d = base / name
+    d.mkdir(parents=True)
+    (d / "SKILL.md").write_text(f"---\nname: {name}\ndescription: about {name}\n---\n{body}")
+    for f in extra or []:
+        (d / f).write_text("x")
+    return d
+
+
+def test_setup_uploads_only_your_own_new_skills(home, monkeypatch):
+    from agentos_cli import setup_cmd
+    cs = home / ".claude" / "skills"
+    _skill(cs, "deploy-checklist")
+    _skill(cs, "already-there")
+    _skill(cs, "aws-iam", extra=[".aws-skill-metadata"])       # another vendor's
+    _skill(home / ".agents" / "skills", "weekly-report")
+    ws = FakeWorkspace(["already-there"])
+    monkeypatch.setenv("AGENTOS_PAT", "t")
+    monkeypatch.setattr(setup_cmd, "_client", lambda: ws)
+    assert setup("--upload") == 0
+    assert sorted(c["name"] for c in ws.created) == ["deploy-checklist", "weekly-report"]
+    assert ws.created[0]["content"].startswith("Do the thing") and ws.created[0]["description"].startswith("about")
+    ws.created.clear()
+    assert setup("--upload") == 0
+    assert ws.created == []  # second run: nothing new; our installed AgentOS skills are never uploaded
+
+
+def test_skills_push_command(home, monkeypatch):
+    from agentos_cli import cli as C
+    _skill(home / ".claude" / "skills", "my-skill")
+    ws = FakeWorkspace([])
+    monkeypatch.setenv("AGENTOS_PAT", "t")
+    monkeypatch.setattr(C, "_ws_client", lambda: ws)
+    assert C.main(["skills", "push"]) == 0
+    assert [c["name"] for c in ws.created] == ["my-skill"]
+
+
+def test_untitled_drafts_are_hidden():
+    from agentos_cli import skills as S
+
+    class C:
+        def call(self, tool, name, arguments):
+            return {"skills": [{"slug": "untitled-skill-9", "name": "Untitled skill"},
+                               {"slug": "gmail", "name": "Gmail body", "description": "d"}], "next_cursor": None}
+    assert [s["slug"] for s in S.workspace_list(C())] == ["gmail"]
+    assert len(S.workspace_list(C(), include_untitled=True)) == 2

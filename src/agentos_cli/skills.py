@@ -96,14 +96,18 @@ def bundled() -> list[Skill]:
     return out
 
 
-def workspace_list(client) -> list[dict]:
-    """[{slug, name, description}] from skills_list, following pages."""
+UNTITLED = re.compile(r"^untitled skill\b", re.I)
+
+
+def workspace_list(client, include_untitled: bool = False) -> list[dict]:
+    """[{slug, name, description}] from skills_list, following pages. Drafts named
+    "Untitled skill" are left out unless include_untitled."""
     out, cursor = [], None
     for _ in range(50):
         args = {"cursor": cursor} if cursor else {}
         res = call_tool(client, "skills_list", args)
         for s in (res or {}).get("skills", []):
-            if s.get("slug"):
+            if s.get("slug") and (include_untitled or not UNTITLED.match(s.get("name") or "")):
                 out.append({"slug": s["slug"], "name": s.get("name") or s["slug"], "description": s.get("description") or ""})
         cursor = (res or {}).get("next_cursor")
         if not cursor:
@@ -245,3 +249,57 @@ def find_installed_by_id(base: Path, source: str, sid: str) -> Path | None:
         if m and m.get("source") == source and m.get("id") == sid:
             return d
     return None
+
+
+# ---------------------------------------------------------------- your own skills -> workspace
+
+# Files other installers drop next to SKILL.md; a folder with one isn't the person's own skill.
+VENDOR_MARKERS = (".aws-skill-metadata",)
+
+
+def _front(text: str) -> tuple[dict, str]:
+    m = re.match(r"\A---\n(.*?)\n---\n?", text, re.S)
+    meta = {}
+    if m:
+        for line in m.group(1).splitlines():
+            k, _, v = line.partition(":")
+            if v:
+                meta[k.strip()] = v.strip().strip('"').strip("'")
+        text = text[m.end():]
+    return meta, text.lstrip("\n")
+
+
+def local_skills(bases: list[Path]) -> list[dict]:
+    """Skills the person wrote: SKILL.md folders that aren't ours or another tool's."""
+    out, seen = [], set()
+    for base in bases:
+        if not base.is_dir():
+            continue
+        for d in sorted(base.iterdir()):
+            md = d / "SKILL.md"
+            if d.name.startswith(".") or not md.is_file() or (d / MARKER).exists():
+                continue
+            if any((d / v).exists() for v in VENDOR_MARKERS):
+                continue
+            meta, body = _front(md.read_text(errors="replace"))
+            name = meta.get("name") or d.name
+            key = safe_name(name)
+            if not key or key in seen or not body.strip():
+                continue
+            seen.add(key)
+            out.append({"name": name, "slug": key, "description": meta.get("description", ""), "body": body,
+                        "path": d, "extra_files": sum(1 for f in d.rglob("*") if f.is_file()) - 1})
+    return out
+
+
+def not_in_workspace(local: list[dict], workspace: list[dict]) -> list[dict]:
+    have = {w["slug"] for w in workspace} | {safe_name(w["name"]) for w in workspace}
+    return [s for s in local if s["slug"] not in have]
+
+
+def push(client, skill: dict) -> dict:
+    """Create the skill in the workspace (skills_create). Returns the tool result."""
+    args = {"name": skill["name"], "content": skill["body"]}
+    if skill.get("description"):
+        args["description"] = skill["description"][:500]
+    return call_tool(client, "skills_create", args)

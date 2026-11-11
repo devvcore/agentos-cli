@@ -210,6 +210,25 @@ def cmd_skills(a) -> int:
             ui.dim(ws_err)
         return rc
 
+    if a.skills_cmd == "push":
+        from pathlib import Path
+        local = S.local_skills([Path(p).expanduser().parent for p in a.paths] if a.paths else bases + [paths.home() / ".codex" / "skills"])
+        if a.paths:
+            want = {Path(p).expanduser().resolve() for p in a.paths}
+            local = [s for s in local if s["path"].resolve() in want]
+        client = _ws_client()
+        todo = S.not_in_workspace(local, S.workspace_list(client, include_untitled=True))
+        if a.dry_run or not todo:
+            rows = [{"name": s["name"], "path": str(s["path"])} for s in todo]
+            return _skills_table(rows, a, ("name", "path")) if rows else (ui.ok("Nothing to upload: they're all in your workspace already.") or 0)
+        rc = 0
+        for s in todo:
+            res = S.push(client, s)
+            good = not (isinstance(res, dict) and res.get("ok") is False)
+            (ui.ok if good else ui.warn)(f"{s['name']}: {'uploaded' if good else 'not uploaded'}  [dim]{ui.short(s['path'])}[/]")
+            rc = rc or (0 if good else 1)
+        return rc
+
     if a.skills_cmd == "search":
         res = S.call_tool(_ws_client(), "skills_search", {"q": " ".join(a.query), **({"where": "online"} if a.online else {})})
         _emit(res, a.json)
@@ -383,7 +402,11 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--skills", choices=["agentos", "workspace", "all", "none"], default="agentos")
     s.add_argument("--workspace-skills", help="comma-separated workspace skill slugs")
     s.add_argument("--no-mcp", action="store_true")
-    s.add_argument("--capture", action="store_true", help="also run agentos-capture setup (compression + capture)")
+    s.add_argument("--compression", "--capture", dest="compression", action="store_true",
+                   help="also turn on compression (agentos-capture)")
+    s.add_argument("--upload", dest="upload", action="store_true", default=None,
+                   help="upload your own skills to the workspace (on by default when you run setup yourself)")
+    s.add_argument("--no-upload", dest="upload", action="store_false")
     s.add_argument("--force", action="store_true", help="replace a custom agentos entry or a skill you edited")
     s.add_argument("--dry-run", action="store_true", help="show the plan, change nothing")
     s.add_argument("--undo", action="store_true", help="remove what aos setup added")
@@ -404,6 +427,10 @@ def build_parser() -> argparse.ArgumentParser:
     x = ss.add_parser("search")
     x.add_argument("query", nargs="+")
     x.add_argument("--online", action="store_true", help="search public skills too")
+    x.add_argument("--json", action="store_true")
+    x = ss.add_parser("push", help="upload skills you wrote to your workspace")
+    x.add_argument("paths", nargs="*", help="skill folders (default: your agents' skills not yet in the workspace)")
+    x.add_argument("--dry-run", action="store_true")
     x.add_argument("--json", action="store_true")
     for name in ("add", "update", "remove"):
         x = ss.add_parser(name)

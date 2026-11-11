@@ -11,6 +11,7 @@ first time it connects (the server supports DCR + PKCE for all of these).
 from __future__ import annotations
 
 import json
+import os
 import re
 import shutil
 import sys
@@ -96,6 +97,15 @@ AGENTS: list[Agent] = [
 ]
 
 BY_ID = {a.id: a for a in AGENTS}
+
+
+def openbot_shares_claude() -> bool:
+    """True when OpenBot runs on this computer with Claude Code's default config:
+    then ~/.claude.json is shared with every OpenBot agent, so a user-level MCP
+    entry there reaches all of them, not just the person's own Claude Code."""
+    if os.environ.get("CLAUDE_CONFIG_DIR"):
+        return False
+    return any(p.exists() for p in (H() / "Library" / "Application Support" / "OpenBot", H() / ".config" / "OpenBot"))
 
 
 def detected() -> list[tuple[Agent, str]]:
