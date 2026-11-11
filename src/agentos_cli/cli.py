@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+from pathlib import Path
 import json
 import os
 import re
@@ -16,7 +17,9 @@ HELP = [
     ("Get started", [
         ("login", "sign in (opens your browser; creates an account if you need one)"),
         ("setup", "add AgentOS to every coding agent here: MCP server, skills, compression"),
+        ("status", "everything at a glance: sign-in, agents' MCP and skills, capture, this folder"),
         ("doctor", "check sign-in, connection and what each agent has"),
+        ("help <topic>", "how it fits together: overview · setup · mcp · skills · spaces · capture · secrets"),
     ]),
     ("Work", [
         ("context <subject>", "what AgentOS knows about a person, company, Project or topic"),
@@ -40,7 +43,7 @@ HELP = [
     ("Skills and agents", [
         ("skills <verb>", "list · add · remove · update · outdated · search: skills in your agents"),
         ("agents", "coding agents found on this computer"),
-        ("capture …", "compression and work capture (agentos-capture)"),
+        ("capture …", "compression and work capture (private preview; only if installed)"),
     ]),
     ("Account", [
         ("whoami", "who you're signed in as"),
@@ -52,13 +55,19 @@ HELP = [
 EXIT_CODES = "Exit codes: 0 ok · 1 error · 2 waiting for approval · 3 claimed by someone else · 4 timed out"
 
 
+def _help_rows():
+    for title, rows in HELP:
+        rows = [r for r in rows if not (r[0].startswith("capture") and not shutil.which("agentos-capture"))]
+        yield title, rows
+
+
 def print_help() -> None:
     from rich.table import Table
     ui.header("aos  ·  AgentOS from your terminal", f"v{__version__}")
     t = Table.grid(padding=(0, 3))
     t.add_column(no_wrap=True)
     t.add_column(style="dim")
-    for n, (title, rows) in enumerate(HELP):
+    for n, (title, rows) in enumerate(_help_rows()):
         if n:
             t.add_row("", "")
         t.add_row(f"[bold {ui.ACCENT}]{title}[/]", "")
@@ -290,13 +299,13 @@ def cmd_skills(a) -> int:
         if a.dry_run or not todo:
             rows = [{"name": s["name"], "path": str(s["path"])} for s in todo]
             return _skills_table(rows, a, ("name", "path")) if rows else (ui.ok("Nothing to upload: they're all in your workspace already.") or 0)
-        rc = 0
-        for s in todo:
-            res = S.push(client, s)
-            good = not (isinstance(res, dict) and res.get("ok") is False)
-            (ui.ok if good else ui.warn)(f"{s['name']}: {'uploaded' if good else 'not uploaded'}  [dim]{ui.short(s['path'])}[/]")
-            rc = rc or (0 if good else 1)
-        return rc
+        from .setup_cmd import _upload
+        up, failed, stopped = _upload(client, todo)
+        if up:
+            ui.ok(f"Added {len(up)} skill{'s' * (len(up) != 1)} to your workspace")
+        if failed:
+            ui.warn(f"Couldn't add: {', '.join(failed)}")
+        return 130 if stopped else (1 if failed else 0)
 
     if a.skills_cmd == "search":
         res = S.call_tool(_ws_client(), "skills_search", {"q": " ".join(a.query), **({"where": "online"} if a.online else {})})
@@ -467,6 +476,59 @@ def capture_health() -> tuple[str, str]:
     return "ok", f"Compression + capture: running on port {port} · {seen} request(s) since it started"
 
 
+def status_overview(as_json: bool) -> dict:
+    """Everything local, no network: sign-in, agents, capture, this folder's space."""
+    from . import spaces
+    info: dict = {}
+    try:
+        _, src = auth.token_source()
+        lg = auth.load_login() or {}
+        info["signed_in"] = {"via": src, "user": lg.get("user") or lg.get("user_id"),
+                             "workspace": lg.get("workspace") or lg.get("workspace_id")}
+    except Exception:
+        info["signed_in"] = None
+    ags = []
+    for ag, where in A.detected():
+        ags.append({"agent": ag.name, "mcp": A.mcp_status(ag),
+                    "skills": len(S.installed([ag.skills_dir()])) if ag.skills_dir else None})
+    info["agents"] = ags
+    level, msg = capture_health()
+    info["capture"] = {"level": level, "message": msg}
+    root = spaces.find_root(Path.cwd())
+    info["folder"] = None
+    if root:
+        st = spaces.load_state(root)
+        info["folder"] = {"path": str(root), "space": st.get("space"), "version": st.get("version")}
+    if as_json:
+        return info
+    ui.header("aos status", paths.base_url())
+    from rich.table import Table
+    t = Table.grid(padding=(0, 3))
+    t.add_column(no_wrap=True, style="bold")
+    t.add_column()
+    si = info["signed_in"]
+    t.add_row("Account", (f"[green]✓[/] signed in" + (f" as {si['user']}" if si.get("user") else "")
+                          + (f" · workspace {si['workspace']}" if si.get("workspace") else "") + f" [dim]({si['via']})[/]")
+              if si else "[yellow]![/] not signed in · run `aos login`")
+    first = True
+    label = {"ours": "[green]✓[/] MCP server added", "custom": "[yellow]![/] has its own agentos entry",
+             "absent": "[yellow]·[/] MCP server not added", "link": "added in the app", "error": "[red]✕[/] config unreadable"}
+    for g in ags:
+        sk = "" if g["skills"] is None else f" · {g['skills']} AgentOS skill{'s' * (g['skills'] != 1)}"
+        t.add_row("Agents" if first else "", f"{g['agent']:<18} {label[g['mcp']]}{sk}")
+        first = False
+    if not ags:
+        t.add_row("Agents", "[dim]no coding agents found[/]")
+    t.add_row("Capture", {"ok": "[green]✓[/] ", "warn": "[yellow]![/] ", "dim": "[dim]·[/] "}[level] + msg.split(": ", 1)[-1])
+    f = info["folder"]
+    t.add_row("This folder", f"linked to space [bold]{f['space']}[/] (v{f['version']}) · syncs when you run `aos push` / `aos pull`"
+              if f else "[dim]not linked to a space (`aos help spaces`)[/]")
+    ui.console.print(t)
+    if any(g["mcp"] == "absent" for g in ags) or not si:
+        ui.dim("  Run `aos setup` to add what's missing.")
+    return info
+
+
 def cmd_doctor(a) -> int:
     ui.header("aos doctor", paths.base_url())
     rc = 0
@@ -632,6 +694,20 @@ def main(argv=None) -> int:
     verb = argv[i] if i < len(argv) else None
 
     from . import spaces
+    if verb == "status":
+        rest = argv[i + 1:]
+        as_json = "--json" in rest
+        info = status_overview(as_json)
+        if as_json:
+            print(json.dumps(info, default=str))
+            return 0
+        if info.get("folder"):
+            ui.console.print()
+            return _friendly(lambda: spaces.main([x for x in argv if x != "--json"]))
+        return 0
+    if verb == "help" and i + 1 < len(argv):
+        from . import topics
+        return topics.show(argv[i + 1])
     if verb in spaces.VERBS:
         return _friendly(lambda: spaces.main(argv))
     if verb == "integrations":
