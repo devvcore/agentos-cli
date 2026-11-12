@@ -29,7 +29,7 @@ aos setup --yes
 it finds, and backs up every file it changes. Each agent then signs in once
 with OAuth. Tell the person before you run it, since it edits their agents'
 settings; `aos setup --undo` takes it out. Afterwards `aos context`,
-`aos call <tool>`, `aos connect <app>` and `aos secrets set <name>` work from the
+`aos call <app> <action>`, `aos connect <app>` and `aos secrets set <name>` work from the
 shell too. Skip this step when there is no shell or it isn't their computer.
 
 ## 1. Look

@@ -8,17 +8,16 @@ connected apps. `aos` puts it on this computer:
 
   aos setup          adds AgentOS (an MCP server, plus skills) to each coding agent
                      here: Claude Code, Codex, Cursor, Claude desktop… Each agent
-                     signs in once, then calls AgentOS itself.
+                     signs in once, then uses AgentOS itself.
   aos context        what AgentOS knows about a person, company or topic.
-  aos integrations   everything you can do through AgentOS, in one list: its own
-                     actions (tasks, CRM, memory…) and your connected apps (Gmail,
-                     Slack, Stripe…). `aos integrations run <action>` does one.
-  aos connect        connect another app.   aos secrets   store API keys.
-  aos skills         the skills your agents use.
+  aos call           do something: in AgentOS itself (`aos call agentos`) or in one
+                     of your apps (`aos call gmail`).
+  aos integrations   your connected apps.   aos connect   connect another one.
+  aos secrets        store API keys.        aos skills    the skills your agents use.
   aos space          share a folder with people and agents (optional).
 
 `aos status` shows all of it at a glance.
-Topics: aos help setup | integrations | space | secrets | skills | status
+Topics: aos help setup | call | integrations | space | secrets | skills | status
 """),
     "setup": ("aos setup", """
 Finds the coding agents on this computer and shows one line per agent: what it
@@ -37,21 +36,27 @@ Each agent then signs in once:
   aos setup --agents codex,cursor  only these agents
   aos setup --dry-run              show the plan, change nothing
 """),
-    "integrations": ("aos integrations: everything you can do", """
-One list of actions, from two places:
-  AgentOS     your workspace itself: tasks, CRM, memory, files, meetings…
-              (names like tasks_list, crm_contacts_search)
-  your apps   Gmail, Slack, Stripe, HubSpot… connected to AgentOS
-              (names like GMAIL_SEND_EMAIL). AgentOS holds their logins.
+    "call": ("aos call: do something", """
+  aos call agentos                       what AgentOS itself can do: tasks, CRM, memory, files…
+  aos call agentos tasks                 search it
+  aos call agentos tasks_list '{"status":"open"}'
 
-  aos integrations                     AgentOS and your connected apps
-  aos integrations send email          find actions by words
-  aos integrations show GMAIL_SEND_EMAIL     what it does, its arguments
-  aos integrations run tasks_list '{"status":"open"}'
-  echo '{"to":"…"}' | aos integrations run GMAIL_SEND_EMAIL
+  aos call gmail                         what one of your apps can do
+  aos call gmail send                    search it
+  aos call gmail send_email '{"recipient_email":"ada@example.com","subject":"Hi","body":"…"}'
+  aos call gmail send_email --describe   what it does and its arguments
 
-Exit code 2 means it's waiting for a person's approval: not done yet.
-An app that isn't connected: `aos connect <app>`.
+An action runs only when its name matches exactly; anything else is a search,
+so a typo never runs the wrong thing. AgentOS holds the apps' logins: no key
+ever reaches this computer. Exit code 2 means it's waiting for a person's
+approval: not done yet. Your apps: `aos integrations`.
+"""),
+    "integrations": ("aos integrations: your apps", """
+  aos integrations          the apps connected to your workspace, their accounts
+                            and how many actions each has
+  aos integrations --all    also apps you can connect
+  aos connect hubspot       connect one (with the app's own sign-in)
+  aos call gmail            use one
 """),
     "skills": ("Skills", """
 Skills are folders with a SKILL.md that teach an agent how to do something.
@@ -98,10 +103,10 @@ skills, and whether this folder is shared as a space (then its details follow).
 }
 
 ALIASES = {"spaces": "space", "link": "space", "sync": "space", "auto-sync": "space", "autosync": "space",
-           "push": "space", "pull": "space", "tools": "integrations", "call": "integrations", "apps": "integrations",
-           "actions": "integrations", "keys": "secrets", "connect": "secrets", "credentials": "secrets",
-           "login": "setup", "mcp": "setup", "agents": "setup", "about": "overview", "concepts": "overview",
-           "doctor": "status"}
+           "push": "space", "pull": "space", "run": "call", "do": "call", "actions": "call", "agentos": "call",
+           "tools": "call", "apps": "integrations", "connect": "integrations", "keys": "secrets",
+           "credentials": "secrets", "login": "setup", "mcp": "setup", "agents": "setup", "about": "overview",
+           "concepts": "overview", "doctor": "status"}
 
 
 def show(topic: str | None) -> int:
