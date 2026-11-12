@@ -15,7 +15,7 @@ aos setup      # add AgentOS to Claude Code, Codex, Cursor, opencode, Gemini CLI
 | **Get started** | `aos login` · `aos setup` · `aos status` (`--check` tests the connection) · `aos help [topic]` |
 | **Do things** | `aos context "Acme renewal"` · `aos call agentos [action]` (tasks, CRM, memory…) · `aos call <app> [action]` (Gmail, Stripe…) |
 | **Apps** | `aos integrations` (your connected apps) · `aos connect <app>` |
-| **Keys** | `aos secrets list` · `get <name>` · `run -- <command>` (keys as environment variables) · `set <name>` · `log` (every read, recorded in AgentOS) |
+| **Keys** | `aos secrets list` · `aos secrets get <name>` (e.g. `STRIPE_API_KEY=$(aos secrets get stripe_api_key) python report.py`) · `aos secrets set <name>`. Every read is recorded in AgentOS. |
 | **Skills** | `aos skills list` · `add <name>` · `remove` · `push` (add yours to the workspace) |
 | **Share a folder** | `aos space link` · `push` · `pull` · `sync` (while it runs) · `status` · `diff` · `log` · `restore` · `resolve` · `claim` · `handoff` · `wait` |
 

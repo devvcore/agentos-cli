@@ -25,12 +25,11 @@ An action runs only when its name matches exactly; otherwise `aos call` searches
 
 ## Keys
 ```sh
-aos secrets list                                  # names only, never values
-aos secrets run --only stripe_api_key -- python report.py   # the key arrives as $STRIPE_API_KEY
-aos secrets get stripe_api_key                    # the value itself, when a tool needs it inline
+aos secrets list                                            # names only, never values
+STRIPE_API_KEY=$(aos secrets get stripe_api_key) python report.py
 echo -n "$VALUE" | aos secrets set stripe_api_key -d "Stripe key for billing reports"
 ```
-Prefer `aos secrets run` over `get`: the value goes straight into the program's environment, and when its output comes back to you the value is replaced with `<concealed by aos>`. Never print a value into the conversation, write it to a file, or put it in an argument. Every read is recorded in AgentOS (`aos secrets log`). If the person pastes a key, store it with `aos secrets set` (through stdin) and tell them it's saved. A "stored-credentials permission" error means the person runs `aos login --scope secrets` once.
+Use `$(aos secrets get …)` inline, as above, so the value goes straight to the program and never into the conversation. Never print a value, write it to a file, or put it in an argument you echo. AgentOS records every read. If the person pastes a key, store it with `aos secrets set` (through stdin) and tell them it's saved. A "stored-credentials permission" error means the person runs `aos login --scope secrets` once.
 
 ## Work together in a space
 ```sh
