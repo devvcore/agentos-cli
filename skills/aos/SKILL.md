@@ -1,6 +1,6 @@
 ---
 name: aos
-description: "Use the aos command line to work in AgentOS from this computer: look up context, run AgentOS actions (tasks, CRM, memory) and connected-app actions (Gmail, Slack, Stripe) without handling credentials, store keys, share a folder in a space, claim work, hand off and wait for other agents. Use when the person mentions AgentOS, a space, a handoff, or a connected app and you can run shell commands."
+description: "Use the aos command line to work in AgentOS from this computer: look up context, do things in AgentOS (tasks, CRM, memory) and in connected apps (Gmail, Slack, Stripe) without handling credentials, store keys, share a folder in a space, claim work, hand off and wait for other agents. Use when the person mentions AgentOS, a space, a handoff, or a connected app and you can run shell commands."
 ---
 
 # aos: AgentOS from the terminal
@@ -9,17 +9,19 @@ description: "Use the aos command line to work in AgentOS from this computer: lo
 
 Output is JSON when piped, so parse it instead of scraping text. Exit codes: 0 ok, 1 error, 2 waiting for a human approval (not done), 3 someone else has claimed it, 4 timed out.
 
-`aos status` shows sign-in, which agents have AgentOS, and this folder's space; `aos help <topic>` (overview, setup, integrations, space, secrets, skills) explains each part.
+`aos status` shows sign-in, which agents have AgentOS, and this folder's space; `aos help <topic>` (overview, setup, call, integrations, space, secrets, skills) explains each part.
 
 ## Find out and do things
 ```sh
-aos context "Acme renewal"                       # people, companies, history
-aos integrations send email                      # find actions: AgentOS's own and connected apps'
-aos integrations show GMAIL_SEND_EMAIL           # what it does, its arguments
-aos integrations run tasks_list '{"status":"open"}'
-echo '{"to":"a@b.com","subject":"Hi"}' | aos integrations run GMAIL_SEND_EMAIL
+aos context "Acme renewal"                        # people, companies, history
+aos call agentos tasks                            # AgentOS's own actions (tasks, CRM, memory…): search
+aos call agentos tasks_list '{"status":"open"}'   # …run one
+aos integrations                                  # the person's connected apps
+aos call gmail send                               # an app's actions: search
+aos call gmail send_email --describe              # what it does, its arguments
+echo '{"recipient_email":"ada@example.com","subject":"Hi","body":"…"}' | aos call gmail send_email
 ```
-Actions with lowercase names (`tasks_list`, `crm_contacts_search`) are AgentOS's own; UPPER_CASE ones (`GMAIL_SEND_EMAIL`) are connected apps, run with the workspace's connection. A result with `queued_for_approval` (exit 2) is not done: tell the person what is waiting. If an app isn't connected, `aos connect <app>` gives the person a link.
+An action runs only when its name matches exactly; otherwise `aos call` searches, so list first, then run. Apps run with the workspace's connection: no keys on this computer. A result with `queued_for_approval` (exit 2) is not done: tell the person what is waiting. If an app isn't connected, `aos connect <app>` gives the person a link.
 
 ## Keys
 ```sh
@@ -44,7 +46,7 @@ Files move on `aos space push` and `aos space pull`, or while `aos space sync` r
 
 Pull never overwrites your edits: their copy lands next to yours as `<file>.theirs` (exit 1). Read both, merge by hand, `aos space resolve <file>`, then push.
 
-Before you start something new, check whether it exists (`aos context`, `aos integrations run tasks_list`); when you stop, hand off with what's done, what's left and the next owner.
+Before you start something new, check whether it exists (`aos context`, `aos call agentos tasks_list`); when you stop, hand off with what's done, what's left and the next owner.
 
 ## Skills
 `aos skills list` shows AgentOS and workspace skills; `aos skills add <name>` installs one for every agent on this computer; `aos skills push` adds the person's own skills to the workspace (only when they ask).

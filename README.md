@@ -13,16 +13,17 @@ aos setup      # add AgentOS to Claude Code, Codex, Cursor, opencode, Gemini CLI
 | | |
 |---|---|
 | **Get started** | `aos login` · `aos setup` · `aos status` (`--check` tests the connection) · `aos help [topic]` |
-| **Use AgentOS** | `aos context "Acme renewal"` · `aos integrations [words]` · `aos integrations show <action>` · `aos integrations run <action> '{…}'` · `aos connect <app>` |
+| **Do things** | `aos context "Acme renewal"` · `aos call agentos [action]` (tasks, CRM, memory…) · `aos call <app> [action]` (Gmail, Stripe…) |
+| **Apps** | `aos integrations` (your connected apps) · `aos connect <app>` |
 | **Keys** | `aos secrets set stripe_api_key` (hidden prompt or stdin) · `aos secrets list` · `aos http stripe_api_key https://api.stripe.com/v1/…` (AgentOS adds the key; it never reaches your computer) |
 | **Skills** | `aos skills list` · `add <name>` · `remove` · `push` (add yours to the workspace) |
 | **Share a folder** | `aos space link` · `push` · `pull` · `sync` (while it runs) · `status` · `diff` · `log` · `restore` · `resolve` · `claim` · `handoff` · `wait` |
 
-**`aos integrations` is everything you can do through AgentOS, in one list:** AgentOS's own actions (tasks, CRM, memory, files: lowercase names like `tasks_list`) and your connected apps' (Gmail, Slack, Stripe: names like `GMAIL_SEND_EMAIL`). AgentOS holds the apps' logins.
+**`aos call` does things.** `aos call agentos` lists what AgentOS itself can do (tasks, CRM, memory, files), and `aos call gmail` lists what one of your apps can do. Add an action name to run it: `aos call gmail send_email '{…}'`. Anything that isn't an exact action name is a search, so a typo never runs the wrong thing. `aos integrations` lists your connected apps; AgentOS holds their logins.
 
 Output is JSON when piped, so agents can use every command. Exit codes: `0` ok, `1` error, `2` waiting for a person's approval, `3` someone else has claimed it, `4` timed out.
 
-Older names still work: `aos tools` and `aos call` run `aos integrations`, and `aos push`, `aos sync`… run `aos space push`, `aos space sync`….
+Older forms still work: `aos call tasks_list '{…}'`, `aos integrations run …`, and `aos push`, `aos sync`… (now `aos space push`, `aos space sync`…).
 
 ## Skills
 

@@ -18,12 +18,15 @@ HELP = [
         ("login", "sign in, or create your account, in the browser"),
         ("setup", "add AgentOS (MCP server + skills) to your coding agents"),
         ("status", "sign-in, agents and this folder at a glance"),
-        ("help [topic]", "overview · setup · integrations · space · secrets · skills"),
+        ("help [topic]", "overview, setup, call, integrations, space, secrets, skills"),
     ]),
     ("Use AgentOS", [
         ("context <subject>", "what AgentOS knows about a person, company or topic"),
-        ("integrations [words]", "everything you can do: AgentOS + your connected apps"),
-        ("integrations run <action>", "do one (`show <action>` lists its arguments)"),
+        ("call agentos [action]", "do something in AgentOS: tasks, CRM, memory, files…"),
+        ("call <app> [action]", "do something in one of your apps: Gmail, Slack…"),
+    ]),
+    ("Apps", [
+        ("integrations", "your connected apps and their status"),
         ("connect <app>", "connect Gmail, HubSpot, Stripe… with its own sign-in"),
     ]),
     ("Keys", [
@@ -681,9 +684,12 @@ def main(argv=None) -> int:
     # Old top-level space verbs (aos push, aos sync…) keep working, quietly.
     if verb in spaces.VERBS or verb == "sync":
         return _space(argv[:i] + ["space"] + argv[i:], i)
-    if verb in ("integrations", "tools", "call"):
+    if verb == "call":
+        from . import call
+        return _friendly(lambda: call.main(argv[i + 1:]))
+    if verb in ("integrations", "tools"):  # the second is a hidden alias kept for old scripts
         from . import integrations
-        fn = {"integrations": integrations.main, "tools": integrations.legacy_tools, "call": integrations.legacy_call}[verb]
+        fn = integrations.main if verb == "integrations" else integrations.legacy_tools
         return _friendly(lambda: fn(argv[i + 1:]))
     if verb == "doctor":
         return _friendly(lambda: cmd_doctor(None))

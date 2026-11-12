@@ -24,10 +24,11 @@ def test_status_in_a_linked_folder_names_the_space(home, monkeypatch, tmp_path, 
 
 
 def test_help_topics_and_aliases(capsys):
-    for t in ("overview", "mcp", "link", "sync", "integrations", "tools", "secrets", "status", "setup", "skills", "space"):
+    for t in ("overview", "mcp", "link", "sync", "integrations", "call", "secrets", "status", "setup", "skills", "space"):
         assert cli.main(["help", t]) == 0
     out = capsys.readouterr().out
-    assert "aos space sync" in out and "AgentOS" in out and "GMAIL_SEND_EMAIL" in out
+    assert "aos space sync" in out and "aos call agentos" in out and "aos call gmail send_email" in out
+    assert " tools" not in out
     assert cli.main(["help", "nope"]) == 2
 
 
