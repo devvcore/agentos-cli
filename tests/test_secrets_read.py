@@ -28,6 +28,8 @@ class Fake:
                                 for n in args["names"] if n in VALUES],
                     "missing": [n for n in args["names"] if n not in VALUES]}
         if name == "secrets_get":
+            if "purpose" in args and not getattr(self, "takes_purpose", False):
+                raise mcp.ToolError("`secrets_get` does not take `purpose`. It was ignored.")
             if args["name"] not in VALUES:
                 raise mcp.ToolError("Secret not found")
             return {"name": args["name"], "value": VALUES[args["name"]]}
@@ -84,3 +86,15 @@ def test_get_works_inline_in_a_shell(fake, capfd):
     assert out == VALUES["stripe_api_key"]  # sanity: what $(aos secrets get …) hands the program
     assert cli.main(["secrets", "get", "stripe_api_key"]) == 0
     assert capfd.readouterr().out == VALUES["stripe_api_key"]  # no newline, so $( ) gets the exact value
+
+
+def test_get_labels_reads_as_cli_when_the_server_supports_it(fake, capsys):
+    fake.takes_purpose = True
+    assert cli.main(["secrets", "get", "stripe_api_key"]) == 0
+    assert [a for n, a in fake.calls if n == "secrets_get"][-1] == {"name": "stripe_api_key", "purpose": "cli"}
+
+
+def test_get_still_works_on_a_server_without_the_label(fake, capsys):
+    assert cli.main(["secrets", "get", "stripe_api_key"]) == 0
+    assert capsys.readouterr().out == VALUES["stripe_api_key"]
+    assert [a for n, a in fake.calls if n == "secrets_get"][-1] == {"name": "stripe_api_key"}

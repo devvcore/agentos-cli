@@ -134,6 +134,18 @@ def env_name(name: str) -> str | None:
     return out
 
 
+def _get(client, call, name: str):
+    """secrets_get, labelled purpose=cli so AgentOS's read log shows it came from aos.
+    A server from before that label (it says it "does not take `purpose`") is asked
+    again without it."""
+    try:
+        return call(client, "secrets_get", {"name": name, "purpose": "cli"})
+    except RuntimeError as e:
+        if "purpose" in str(e) and ("does not take" in str(e) or "additional" in str(e).lower()):
+            return call(client, "secrets_get", {"name": name})
+        raise
+
+
 def read_secrets(names: list[str]) -> tuple[list[dict], list[dict]]:
     """([{name, env, value}], [{name, error}]), one audited `secrets_get` per name."""
     from .work import connect, call
@@ -141,7 +153,7 @@ def read_secrets(names: list[str]) -> tuple[list[dict], list[dict]]:
 
     def one(n):
         try:
-            r = call(client, "secrets_get", {"name": n})
+            r = _get(client, call, n)
         except RuntimeError as e:
             msg = str(e)
             if "missing_permission" in msg.lower() or "workspace:secrets" in msg:
