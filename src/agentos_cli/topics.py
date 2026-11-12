@@ -84,13 +84,20 @@ a terminal. There's no background mode: leave sync open in a tab. Don't set up
 scripts or login items for it; macOS flags them as from an unidentified developer.
 """),
     "secrets": ("Keys", """
-  aos secrets set stripe_api_key     store a key (hidden prompt or stdin)
-  aos secrets list                   names only, never values
-  aos http stripe_api_key <url>      call an API; AgentOS adds the key
+  aos secrets list                     your keys: names and descriptions, never values
+  aos secrets get stripe_api_key       print the value
+  aos secrets run -- npm start         run a command with your keys as environment
+                                       variables (stripe_api_key → $STRIPE_API_KEY)
+  aos secrets run --only stripe_api_key -- python report.py
+  aos secrets set stripe_api_key       store or replace one (hidden prompt, or stdin)
+  aos secrets log                      who read which key, when, from which app or agent
 
-Keys stay in AgentOS and never land on this computer. Storing keys needs one
-extra permission: `aos login --scope secrets`. Apps with their own sign-in
-(Gmail, HubSpot…) are connected with `aos connect <app>` instead.
+Like AWS Secrets Manager or Doppler: you can read a key you have access to, and
+AgentOS records every read (who, which key, when, from where; never the value).
+Personal keys are yours alone; workspace keys go to members with access; bots'
+own credentials are never handed out. Reading needs one extra permission, once:
+`aos login --scope secrets`. Apps with their own sign-in (Gmail, HubSpot…) are
+connected with `aos connect <app>` instead.
 """),
     "status": ("aos status", """
 One view: who you're signed in as, which agents have the AgentOS MCP server and
