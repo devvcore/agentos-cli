@@ -7,9 +7,8 @@ description: Read and update the AgentOS task board. Use when the person asks wh
 
 A task is a commitment: somebody owes an outcome. Observations and status
 updates are not tasks; they belong as a comment on the task they concern or a
-note in a Drive document. Tasks can stand alone; a Project groups related tasks. A separate
-Project carries durable shared context and handoff. Read `agentos-spaces` when
-checkpointing or syncing ongoing work; never create a Project just to group a task.
+note in a Drive document. Each task stands on its own; to hand off ongoing work,
+write the outcome, what's left and the next owner on the task itself.
 
 Run the tools below through `workspace_call`, as `agentos-workspace`
 describes.

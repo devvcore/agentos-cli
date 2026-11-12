@@ -26,7 +26,7 @@ folder is based on, the tree of that version, and any unresolved conflicts.
 
 No merges. Pull never overwrites a file you changed: the incoming copy lands
 next to it as <file>.theirs, the conflict is recorded, and push refuses until
-you merge and run `aos resolve <file>`. Claims are how agents avoid the
+you merge and run `aos space resolve <file>`. Claims are how agents avoid the
 conflict in the first place; each agent session claims under its own name.
 """
 from __future__ import annotations
@@ -632,7 +632,7 @@ def print_diff(added, changed, removed, indent="  "):
 def need_root():
     root = find_root(Path.cwd())
     if not root:
-        raise SystemExit("aos: this folder isn't linked to a space. Run `aos link <space>` first.")
+        raise SystemExit("aos: this folder isn't shared yet. Run `aos space link <name>` first.")
     return root
 
 
@@ -761,7 +761,7 @@ def cmd_link(a):
     save_state(root, {"space": name, "version": 0, "tree": {}, "linked_at": now_iso(), "conflicts": []})
     print(f"Linked {root} to space '{name}' (latest version: {head or 'none yet'}).")
     if head:
-        print("Run `aos pull` to bring it down.")
+        print("Run `aos space pull` to bring it down.")
     return 0
 
 
@@ -794,13 +794,13 @@ def cmd_status(a):
     added, changed, removed = tree_diff(st["tree"], local)
     print_diff(added, changed, removed)
     if st.get("conflicts"):
-        print("unresolved conflicts (merge, then `aos resolve <file>`; push waits until then):")
+        print("unresolved conflicts (merge, then `aos space resolve <file>`; push waits until then):")
         _print_conflicts(st, root)
     claims = active_claims(sp.events(0, last))
     me = whoami(a)
     for rel, c in sorted(claimed_by_others(claims, added + changed + removed, me).items()):
         print(f"  ! {rel}: you changed a file which {c['author']} has claimed (until {c['expires']}). "
-              "`aos push` will refuse it; talk to them or pass --force.")
+              "`aos space push` will refuse it; talk to them or pass --force.")
     if claims:
         print("claims:")
         for t, c in sorted(claims.items()):
@@ -828,7 +828,7 @@ def cmd_push(a):
         print("aos: you have unresolved conflicts; nothing pushed:", file=sys.stderr)
         for rel in st["conflicts"]:
             print(f"  {rel}", file=sys.stderr)
-        print("Merge their changes (in <file>.theirs) into your file, then `aos resolve <file>` and push again.",
+        print("Merge their changes (in <file>.theirs) into your file, then `aos space resolve <file>` and push again.",
               file=sys.stderr)
         return 1
     src = root
@@ -837,7 +837,7 @@ def cmd_push(a):
     sp = open_space(st)
     head, last = sp.sync()
     if head != st["version"]:
-        raise SystemExit(f"aos: the space moved to v{head} (you're on v{st['version']}). Run `aos pull` first.")
+        raise SystemExit(f"aos: the space moved to v{head} (you're on v{st['version']}). Run `aos space pull` first.")
     local = scan(src)
     added, changed, removed = tree_diff(st["tree"], local)
     if not (added or changed or removed):
@@ -856,7 +856,7 @@ def cmd_push(a):
         uploaded = sp.put_objects(todo, step)
     rec = sp.commit(head, me, a.message or "(no message)", local)
     if rec is None:
-        raise SystemExit("aos: someone pushed at the same moment. Run `aos pull`, then push again.")
+        raise SystemExit("aos: someone pushed at the same moment. Run `aos space pull`, then push again.")
     if not a.zip:
         st.update(version=rec["n"], tree=local)
         save_state(root, st)
@@ -873,7 +873,7 @@ def cmd_pull(a):
     if a.version is not None and not (0 < a.version <= head):
         raise SystemExit(f"aos: there is no v{a.version} in '{sp.name}' (latest is v{head}).")
     if target == st["version"]:
-        print(f"Already on v{target}." + (" Conflicts still open: see `aos status`." if st.get("conflicts") else ""))
+        print(f"Already on v{target}." + (" Conflicts still open: see `aos space status`." if st.get("conflicts") else ""))
         return 0
     theirs = sp.version(target)["tree"]
     base = st["tree"]
@@ -914,7 +914,7 @@ def cmd_pull(a):
         else:
             print(f"  conflict: {c} — you both changed it; yours kept, theirs is next to it as {c}.theirs")
     if conflicts:
-        print("Merge, then `aos resolve <file>` (or `aos resolve --all`). Push waits until then.")
+        print("Merge, then `aos space resolve <file>` (or `aos space resolve --all`). Push waits until then.")
     return 1 if conflicts else 0
 
 
@@ -994,7 +994,7 @@ def cmd_restore(a):
         q.parent.mkdir(parents=True, exist_ok=True)
         q.write_bytes(blobs[tree[k]])
     print(f"Restored {len(plan)} file(s) from v{n}" + (f", removed {removed} not in v{n}" if removed else "")
-          + ". Run `aos push` to share it.")
+          + ". Run `aos space push` to share it.")
     return 0
 
 
@@ -1114,7 +1114,7 @@ def cmd_wait(a, forever=False):
 # ---------------------------------------------------------------- cli
 
 def build_parser():
-    p = argparse.ArgumentParser(prog="aos", description="Work in AgentOS spaces with Git-shaped verbs.")
+    p = argparse.ArgumentParser(prog="aos space", description="Share a folder with people and agents, with versions.")
     p.add_argument("--as", dest="as_", help="who you are in the log (default: $AOS_AS, or user@host plus the agent session)")
     sub = p.add_subparsers(dest="cmd", required=True)
 

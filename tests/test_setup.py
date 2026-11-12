@@ -17,9 +17,9 @@ def test_setup_then_undo_round_trip(home):
     assert "[mcp_servers.agentos]" in (home / ".codex" / "config.toml").read_text()
     assert "agentos" in json.loads((home / ".config/opencode/opencode.json").read_text())["mcp"]
     for d in (home / ".claude/skills", home / ".agents/skills"):
-        assert {"aos", "agentos-setup", "agentos-spaces"} <= {p.name for p in d.iterdir()}
+        assert {"aos", "agentos-setup"} <= {p.name for p in d.iterdir()}
     runs = paths.read_json(paths.manifest_path(), {})["runs"]
-    assert len(runs[0]["mcp"]) == 3 and len(runs[0]["skills"]) == 2 * 7
+    assert len(runs[0]["mcp"]) == 3 and len(runs[0]["skills"]) == 2 * 6
     backups = list((home / ".agentos" / "backups").rglob("*"))
     assert any(p.name.endswith(".claude.json") for p in backups)
 
@@ -260,3 +260,17 @@ def test_claude_desktop_without_node_says_how_and_opens_nothing(home, monkeypatc
     assert "Node.js 18+" in out and "Add custom connector" in out
     assert not d.mcp_file().exists() and opened == []
     assert "agentos" in (home / ".codex" / "config.toml").read_text()
+
+
+def test_setup_removes_retired_agentos_spaces_skill(home):
+    from agentos_cli import skills as S
+    base = home / ".claude" / "skills"
+    old = S.Skill("agentos-spaces", "old", "agentos", "agentos-spaces", {"SKILL.md": b"---\nname: agentos-spaces\n---\nold\n"})
+    assert S.install(old, base)[0] == "new"
+    mine = home / ".agents" / "skills" / "agentos-spaces"
+    mine.mkdir(parents=True)
+    (mine / "SKILL.md").write_text("my own")
+    assert setup() == 0
+    assert not (base / "agentos-spaces").exists()
+    assert (mine / "SKILL.md").read_text() == "my own"   # not ours: left alone
+    assert "agentos-spaces" not in {s.name for s in S.bundled()}

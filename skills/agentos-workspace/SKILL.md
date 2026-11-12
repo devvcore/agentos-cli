@@ -1,6 +1,6 @@
 ---
 name: agentos-workspace
-description: Answer questions from the person's AgentOS workspace (documents and files, meetings, CRM, tasks, Projects) with citations. Use whenever the question is about their company, clients, projects, decisions, or who is doing what.
+description: Answer questions from the person's AgentOS workspace (documents and files, meetings, CRM, tasks) with citations. Use whenever the question is about their company, clients, projects, decisions, or who is doing what.
 ---
 
 # Answering from AgentOS
@@ -12,7 +12,7 @@ general knowledge, and say so when it has nothing.
 ## Calling AgentOS tools
 
 The connection lists a few tools directly: `context`, `source_read`,
-`rules_list`, `projects_find`, `projects_get`, `projects_sync`,
+`rules_list`,
 `integration_search`, `workspace_init`, `workspace_tools` and `workspace_call`.
 `source_read` opens a fact (`fact_...`) or message (`evt_...`) that `context`
 cited or left out; `refs=[...]` opens up to 10 at once. `context` leads with
@@ -40,10 +40,7 @@ documents are markdown files in Drive, read and written with `fs`.
    - calls: `meetings_search` or `meetings_list`, then `meetings_get`;
    - companies and people: `crm_companies_search`, `crm_contacts_search`, then
      the matching `_get`;
-   - ongoing shared context: `projects_find`, then `projects_get`; read the
-     `agentos-spaces` skill to resume, sync, checkpoint or hand off that work;
-     `tasks_list` for owed work and Project grouping. Tasks can stand alone;
-     task-group Projects (project_id) and lifecycle Projects (space_id) are separate records;
+   - owed work: `tasks_list` (and `tasks_get` for one task's history);
    - attachments: `drive_list`, then `drive_read`.
 3. `skills_search` and `skills_get` hold the team's own procedures. Read the
    relevant one before doing work the team has a written way of doing.
@@ -62,5 +59,4 @@ documents are markdown files in Drive, read and written with `fs`.
 
 Only write when the person asks you to record something. Prefer adding to what
 exists: read the right document with `fs cat`, then `fs append` to it or `fs
-write` it back with what was there kept; a comment on the existing task; or a
-useful checkpoint in the existing Project following the `agentos-spaces` skill.
+write` it back with what was there kept; or a comment on the existing task.

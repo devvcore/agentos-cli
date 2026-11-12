@@ -6,37 +6,27 @@ aos login      # sign in, or create your AgentOS account, in the browser
 aos setup      # add AgentOS to Claude Code, Codex, Cursor, opencode, Gemini CLI…
 ```
 
-`aos setup` finds the coding agents on your computer, lets you tick what to add (the AgentOS MCP server, the AgentOS skills, your workspace's skills, compression), shows you the exact change to each config file, backs it up, and applies it. Each agent then signs in to AgentOS once with OAuth; no tokens are written to disk. `aos setup --undo` takes it all out again.
+`aos setup` finds the coding agents on your computer and shows one line per agent: the AgentOS MCP server and skills it gets, and the file that changes. Press Enter and it's done; every file is backed up first and `aos setup --undo` takes it all out. Each agent then signs in to AgentOS once; no tokens are written to disk.
 
-## How the pieces fit
-
-| | What it is | Do you need it? |
-|---|---|---|
-| **MCP server** | `aos setup` adds AgentOS to each coding agent's config so the agent can call AgentOS tools. Each agent signs in once. | Yes |
-| **Skills** | `aos setup` installs the AgentOS skills so agents know how to use AgentOS and `aos`. | Yes |
-| **`aos` command** | You and your agents use AgentOS from the terminal. | Yes |
-| **Spaces** (`aos link`) | Share a folder with people and agents, with versions. Changes move when you run `aos push` / `aos pull`, or automatically while `aos sync` runs (`--background` keeps it going on a Mac). | Only for shared folders |
-| **Capture** | Compression of large tool output, plus learning from your coding sessions. Separate tool, private preview. | No |
-
-`aos status` shows all of it at a glance. `aos help <topic>` explains each part: `overview`, `setup`, `mcp`, `skills`, `spaces`, `capture`, `secrets`, `status`.
-
-## What you can do with it
+## Commands
 
 | | |
 |---|---|
-| **Account** | `aos login` · `aos whoami` · `aos logout` |
-| **Your agents** | `aos agents` · `aos setup [--dry-run] [--yes] [--undo]` · `aos doctor` |
-| **Skills** | `aos skills list` · `add <name>` · `remove` · `update` · `outdated` · `search` |
-| **Work** | `aos context "Acme renewal"` · `aos tools --q invoice` · `aos call <any workspace tool> '{…}'` |
-| **Connected apps** | `aos connect hubspot` · `aos integrations search\|describe\|call` |
-| **Credentials** | `aos secrets set stripe_api_key` (hidden prompt or stdin) · `aos secrets list` · `aos http stripe_api_key https://api.stripe.com/v1/…` (AgentOS adds the key; it never reaches your computer) |
-| **Spaces** | `aos link` · `pull` · `push` · `status` · `diff` · `restore` · `log` · `claim` · `release` · `handoff` · `wait` · `watch` |
+| **Get started** | `aos login` · `aos setup` · `aos status` (`--check` tests the connection) · `aos help [topic]` |
+| **Use AgentOS** | `aos context "Acme renewal"` · `aos integrations [words]` · `aos integrations show <action>` · `aos integrations run <action> '{…}'` · `aos connect <app>` |
+| **Keys** | `aos secrets set stripe_api_key` (hidden prompt or stdin) · `aos secrets list` · `aos http stripe_api_key https://api.stripe.com/v1/…` (AgentOS adds the key; it never reaches your computer) |
+| **Skills** | `aos skills list` · `add <name>` · `remove` · `push` (add yours to the workspace) |
+| **Share a folder** | `aos space link` · `push` · `pull` · `sync` (while it runs) · `status` · `diff` · `log` · `restore` · `resolve` · `claim` · `handoff` · `wait` |
+
+**`aos integrations` is everything you can do through AgentOS, in one list:** AgentOS's own actions (tasks, CRM, memory, files: lowercase names like `tasks_list`) and your connected apps' (Gmail, Slack, Stripe: names like `GMAIL_SEND_EMAIL`). AgentOS holds the apps' logins.
 
 Output is JSON when piped, so agents can use every command. Exit codes: `0` ok, `1` error, `2` waiting for a person's approval, `3` someone else has claimed it, `4` timed out.
 
+Older names still work: `aos tools` and `aos call` run `aos integrations`, and `aos push`, `aos sync`… run `aos space push`, `aos space sync`….
+
 ## Skills
 
-[`skills/`](skills) holds the AgentOS skills: `aos`, `agentos-setup`, `agentos-workspace`, `agentos-tasks`, `agentos-crm`, `agentos-meetings` and `agentos-spaces`. `aos setup` installs them into `~/.claude/skills` and `~/.agents/skills`. They are plain `SKILL.md` folders, so any agent that reads skills can use them.
+[`skills/`](skills) holds the AgentOS skills: `aos`, `agentos-setup`, `agentos-workspace`, `agentos-tasks`, `agentos-crm` and `agentos-meetings`. `aos setup` installs them into `~/.claude/skills` and `~/.agents/skills`. They are plain `SKILL.md` folders, so any agent that reads skills can use them.
 
 ## Claude Code plugin
 

@@ -15,54 +15,42 @@ from . import __version__, agents as A, auth, paths, skills as S, ui
 
 HELP = [
     ("Get started", [
-        ("login", "sign in (opens your browser; creates an account if you need one)"),
-        ("setup", "add AgentOS to every coding agent here: MCP server, skills, compression"),
-        ("status", "everything at a glance: sign-in, agents' MCP and skills, capture, this folder"),
-        ("doctor", "check sign-in, connection and what each agent has"),
-        ("help <topic>", "how it fits together: overview · setup · mcp · skills · spaces · capture · secrets"),
+        ("login", "sign in, or create your account, in the browser"),
+        ("setup", "add AgentOS (MCP server + skills) to your coding agents"),
+        ("status", "sign-in, agents and this folder at a glance"),
+        ("help [topic]", "overview · setup · integrations · space · secrets · skills"),
     ]),
-    ("Work", [
-        ("context <subject>", "what AgentOS knows about a person, company, Project or topic"),
-        ("tools [--q words]", "find workspace tools; --name <tool> for its schema"),
-        ("call <tool> [json]", "run any workspace tool (JSON args, --args-file, or stdin)"),
-        ("integrations …", "use connected apps; AgentOS holds the credentials"),
+    ("Use AgentOS", [
+        ("context <subject>", "what AgentOS knows about a person, company or topic"),
+        ("integrations [words]", "everything you can do: AgentOS + your connected apps"),
+        ("integrations run <action>", "do one (`show <action>` lists its arguments)"),
+        ("connect <app>", "connect Gmail, HubSpot, Stripe… with its own sign-in"),
     ]),
-    ("Credentials", [
-        ("secrets set <name>", "store a key in your workspace (hidden prompt or stdin; never shown again)"),
-        ("secrets list", "stored key names and descriptions, never values"),
-        ("http <key> <url>", "call an API with a stored key; AgentOS adds it, it never reaches you"),
-        ("connect <app>", "connect Gmail, HubSpot, Stripe… with the app's own sign-in"),
+    ("Keys", [
+        ("secrets set <name> · list", "store a key in AgentOS; list names, never values"),
+        ("http <key> <url>", "call an API with a stored key; it never reaches you"),
     ]),
-    ("Spaces", [
-        ("link · status · pull · push", "share a folder as a space with versions"),
-        ("sync [--background]", "push and pull for you as you work (aos help sync)"),
-        ("diff · restore · log", "see and undo changes"),
-        ("resolve <file>", "after a pull conflict: mark the file merged so push works again"),
-        ("claim · release · handoff", "coordinate with people and other agents"),
-        ("wait · watch", "block until a push, claim or handoff happens"),
+    ("Skills", [
+        ("skills list · add · remove · push", "skills in your agents; push adds yours"),
     ]),
-    ("Skills and agents", [
-        ("skills <verb>", "list · add · remove · update · outdated · search: skills in your agents"),
-        ("agents", "coding agents found on this computer"),
-        ("capture …", "compression and work capture (private preview; only if installed)"),
-    ]),
-    ("Account", [
-        ("whoami", "who you're signed in as"),
-        ("auth token · status", "the sign-in for scripts and tools (AgentOS Capture uses it)"),
-        ("logout", "sign out on this computer"),
+    ("Share a folder", [
+        ("space link · push · pull · sync", "a folder shared with people and agents"),
+        ("space …", "status, diff, log, claim, handoff, wait: `aos space`"),
     ]),
 ]
+
+
 
 EXIT_CODES = "Exit codes: 0 ok · 1 error · 2 waiting for approval · 3 claimed by someone else · 4 timed out"
 
 
 def _help_rows():
     for title, rows in HELP:
-        rows = [r for r in rows if not (r[0].startswith("capture") and not shutil.which("agentos-capture"))]
         yield title, rows
 
 
 def print_help() -> None:
+    from rich.markup import escape
     from rich.table import Table
     ui.header("aos  ·  AgentOS from your terminal", f"v{__version__}")
     t = Table.grid(padding=(0, 3))
@@ -73,7 +61,7 @@ def print_help() -> None:
             t.add_row("", "")
         t.add_row(f"[bold {ui.ACCENT}]{title}[/]", "")
         for cmd, desc in rows:
-            t.add_row(f"  aos {cmd}", desc)
+            t.add_row(escape(f"  aos {cmd}"), escape(desc))
     ui.console.print(t)
     ui.console.print()
     ui.dim(EXIT_CODES + "\nOutput is JSON when piped. Run `aos <command> --help` for options.")
@@ -387,58 +375,6 @@ def _skills_table(rows, a, cols) -> int:
 
 # ---------------------------------------------------------------- work
 
-def cmd_tools(a) -> int:
-    from concurrent.futures import ThreadPoolExecutor
-    from .work import connect, call
-    client = connect()
-    args = {k: v for k, v in {"q": a.q, "family": a.family, "name": a.name, "limit": a.limit}.items() if v}
-    # A search also looks through connected-app actions (Slack, Gmail, GitHub…), in parallel:
-    # those live behind `aos integrations`, and people search for "send slack", not for a family.
-    want_apps = bool(a.q) and not a.name and not a.family
-    with ThreadPoolExecutor(2) as pool:
-        tools_f = pool.submit(client.call, "workspace_tools", **args)
-        apps_f = pool.submit(call, client, "integration_search", {"q": a.q}) if want_apps else None
-        res = tools_f.result()
-        try:
-            apps = apps_f.result() if apps_f else None
-        except Exception:
-            apps = None
-    app_rows = [t for t in ((apps or {}).get("tools") or []) if isinstance(t, dict)][: a.limit] if isinstance(apps, dict) else []
-    if a.json or not sys.stdout.isatty() or a.name:
-        if want_apps and isinstance(res, dict):
-            res = {**res, "app_actions": app_rows}
-        _emit(res, a.json)
-        return 0
-    tools = (res or {}).get("tools", [])
-    if tools:
-        t = ui.table("Tool", "Family", "What it does")
-        for tool in tools:
-            t.add_row(f"[bold]{tool['name']}[/]", f"[dim]{tool.get('family', '')}[/]", _one_line(tool.get("description")))
-        ui.console.print(t)
-        ui.dim("Run one with `aos call <tool> '{...}'`; `aos tools --name <tool>` shows its arguments.")
-    if app_rows:
-        ui.console.print()
-        t = ui.table("App action", "App", "Connected", "What it does", title="Connected-app actions")
-        for r in app_rows:
-            t.add_row(f"[bold]{r.get('slug', '')}[/]", r.get("toolkit_slug", ""),
-                      "[green]✓[/]" if r.get("connected") else "[dim]—[/]", _one_line(r.get("description") or r.get("name"), 60))
-        ui.console.print(t)
-        ui.dim("Run one with `aos integrations call <ACTION> --args-file -`; `aos integrations describe <ACTION>` shows its arguments.")
-    if not tools and not app_rows:
-        ui.dim("Nothing matched. Try fewer words.")
-    elif (res or {}).get("next_cursor"):
-        ui.dim(f"{res.get('total')} tools match; narrow with --q or --family.")
-    return 0
-
-
-def cmd_call(a) -> int:
-    from .work import connect, call, parse_args_input, outcome
-    args = parse_args_input(a.json_args, a.args_file)
-    res = call(connect(), a.tool, args)
-    _emit(res, a.json)
-    return outcome(res)
-
-
 def cmd_context(a) -> int:
     from .work import connect, call, outcome
     args = {"subject": " ".join(a.subject), "mode": "evidence"}
@@ -499,11 +435,9 @@ def status_overview(as_json: bool) -> dict:
     info["folder"] = None
     if root:
         st = spaces.load_state(root)
-        from . import sync
-        info["folder"] = {"path": str(root), "space": st.get("space"), "version": st.get("version"),
-                          "sync": sync.background_status(root) or "off"}
+        info["folder"] = {"path": str(root), "space": st.get("space"), "version": st.get("version")}
     from . import sync as _sync
-    info["background_sync"] = _sync.all_background()
+    info["old_background_sync"] = _sync.all_background()  # left by aos 0.2.8–0.2.9
     if as_json:
         return info
     ui.header("aos status", paths.base_url())
@@ -524,18 +458,17 @@ def status_overview(as_json: bool) -> dict:
         first = False
     if not ags:
         t.add_row("Agents", "[dim]no coding agents found[/]")
-    t.add_row("Capture", {"ok": "[green]✓[/] ", "warn": "[yellow]![/] ", "dim": "[dim]·[/] "}[level] + msg.split(": ", 1)[-1])
+    if shutil.which("agentos-capture"):
+        t.add_row("Capture", {"ok": "[green]✓[/] ", "warn": "[yellow]![/] ", "dim": "[dim]·[/] "}[level] + msg.split(": ", 1)[-1])
     f = info["folder"]
     if f:
-        how = ("[green]✓[/] background sync running" if f["sync"] == "running"
-               else "[yellow]![/] background sync stopped (see .aos/sync.log)" if f["sync"] == "stopped"
-               else "syncs on `aos push` / `aos pull`, or `aos sync`")
-        t.add_row("This folder", f"linked to space [bold]{f['space']}[/] (v{f['version']}) · {how}")
+        t.add_row("This folder", f"shared as space [bold]{f['space']}[/] (v{f['version']}) · "
+                  "moves on `aos space push` / `pull`, or while `aos space sync` runs")
     else:
-        t.add_row("This folder", "[dim]not linked to a space (`aos help spaces`)[/]")
-    for b in info["background_sync"]:
-        if not f or b["folder"] != f["path"]:
-            t.add_row("Sync", f"background sync {b['state']}: {ui.short(b['folder'])}")
+        t.add_row("This folder", "[dim]not shared (`aos help space`)[/]")
+    for b in info["old_background_sync"]:
+        t.add_row("Old sync", f"[yellow]![/] a background sync from aos 0.2.8 is set up for {ui.short(b['folder'])}: "
+                  "remove it with `aos space sync --stop` there")
     ui.console.print(t)
     if any(g["mcp"] == "absent" for g in ags) or not si:
         ui.dim("  Run `aos setup` to add what's missing.")
@@ -651,21 +584,6 @@ def build_parser() -> argparse.ArgumentParser:
         x.add_argument("--json", action="store_true")
     s.set_defaults(fn=cmd_skills)
 
-    s = sub.add_parser("tools")
-    s.add_argument("--q")
-    s.add_argument("--family")
-    s.add_argument("--name")
-    s.add_argument("--limit", type=int, default=20)
-    s.add_argument("--json", action="store_true")
-    s.set_defaults(fn=cmd_tools)
-
-    s = sub.add_parser("call")
-    s.add_argument("tool")
-    s.add_argument("json_args", nargs="?")
-    s.add_argument("--args-file")
-    s.add_argument("--json", action="store_true")
-    s.set_defaults(fn=cmd_call)
-
     s = sub.add_parser("context")
     s.add_argument("subject", nargs="+")
     s.add_argument("--question", "-q")
@@ -699,6 +617,41 @@ def _friendly(fn):
         return 1
 
 
+SPACE_HELP = """usage: aos space <command>
+
+Share a folder with people and agents, with versions. Nothing moves until you push,
+pull, or run `aos space sync`.
+
+  link <name>          tie this folder to a space (made on first push)
+  push -m "…"          upload your changes as a new version
+  pull                 download what others changed (never overwrites your edits)
+  sync                 push and pull for you while it runs (Ctrl-C stops it)
+  status · diff · log  what changed, and the history
+  restore <file>       put a file back as it was in a version
+  resolve <file>       after a conflict: mark the file merged so push works again
+  claim · release · handoff   tell others what you're on, and hand it over
+  wait · watch         block until a push, claim or handoff happens
+  spaces               list the workspace's spaces
+
+Run `aos space <command> --help` for its options. More: `aos help space`."""
+
+
+def _space(argv: list[str], i: int) -> int:
+    """`aos space <verb> …`: global flags before `space` (like --as) are kept."""
+    from . import spaces
+    pre, rest = argv[:i], argv[i + 1:]
+    if not rest or rest[0] in ("-h", "--help", "help"):
+        print(SPACE_HELP)
+        return 0
+    if rest[0] == "sync":
+        from . import sync
+        return _friendly(lambda: sync.main(rest[1:]))
+    if rest[0] not in spaces.VERBS:
+        ui.fail(f"`aos space {rest[0]}` isn't a command. See `aos space --help`.")
+        return 2
+    return _friendly(lambda: spaces.main(pre + rest))
+
+
 def main(argv=None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     i = 0
@@ -706,12 +659,13 @@ def main(argv=None) -> int:
         i += 1 if "=" in argv[i] else 2
     verb = argv[i] if i < len(argv) else None
 
-    if verb == "sync":
-        from . import sync
-        return _friendly(lambda: sync.main(argv[i + 1:]))
     from . import spaces
+    if verb == "space":
+        return _space(argv, i)
     if verb == "status":
         rest = argv[i + 1:]
+        if "--check" in rest:
+            return _friendly(lambda: cmd_doctor(None))
         as_json = "--json" in rest
         info = status_overview(as_json)
         if as_json:
@@ -719,20 +673,20 @@ def main(argv=None) -> int:
             return 0
         if info.get("folder"):
             ui.console.print()
-            return _friendly(lambda: spaces.main([x for x in argv if x != "--json"]))
+            return _friendly(lambda: spaces.main(["status", *[x for x in rest if x != "--json"]]))
         return 0
     if verb == "help" and i + 1 < len(argv):
         from . import topics
         return topics.show(argv[i + 1])
-    if verb in spaces.VERBS:
-        return _friendly(lambda: spaces.main(argv))
-    if verb == "integrations":
+    # Old top-level space verbs (aos push, aos sync…) keep working, quietly.
+    if verb in spaces.VERBS or verb == "sync":
+        return _space(argv[:i] + ["space"] + argv[i:], i)
+    if verb in ("integrations", "tools", "call"):
         from . import integrations
-        return _friendly(lambda: integrations.main(argv[i + 1:]))
-    from .integrations import SERVICE_TOOLS
-    if verb in SERVICE_TOOLS:
-        from . import integrations
-        return _friendly(lambda: integrations.service_main(verb, argv[i + 1:]))
+        fn = {"integrations": integrations.main, "tools": integrations.legacy_tools, "call": integrations.legacy_call}[verb]
+        return _friendly(lambda: fn(argv[i + 1:]))
+    if verb == "doctor":
+        return _friendly(lambda: cmd_doctor(None))
     if verb == "capture":
         exe = shutil.which("agentos-capture")
         if not exe:

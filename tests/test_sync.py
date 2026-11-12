@@ -41,7 +41,7 @@ def test_sync_stops_on_a_conflict_and_overwrites_nothing(fs, tmp_path, monkeypat
 def test_sync_main_outside_a_linked_folder(tmp_path, monkeypatch, capsys):
     monkeypatch.chdir(tmp_path)
     assert sync.main([]) == 1
-    assert "aos link" in capsys.readouterr().err
+    assert "aos space link" in capsys.readouterr().err
 
 
 def test_status_shows_sync_state_for_a_linked_folder(fs, tmp_path, monkeypatch, capsys):
@@ -50,11 +50,11 @@ def test_status_shows_sync_state_for_a_linked_folder(fs, tmp_path, monkeypatch, 
     capsys.readouterr()
     assert cli.main(["status", "--json"]) == 0
     d = json.loads(capsys.readouterr().out)
-    assert d["folder"]["sync"] == "off" and isinstance(d["background_sync"], list)
+    assert d["folder"]["space"] and isinstance(d["old_background_sync"], list)
 
 
 def test_help_sync_topic(capsys):
     assert cli.main(["help", "sync"]) == 0
     out = capsys.readouterr().out
-    assert "aos sync --background" in out and "unidentified developer" in out
+    assert "aos space sync" in out and "no background mode" in out
     assert cli.main(["help", "auto-sync"]) == 0

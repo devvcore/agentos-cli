@@ -11,7 +11,7 @@ def test_status_overview_json_outside_a_space(home, monkeypatch, tmp_path, capsy
     info = json.loads(capsys.readouterr().out)
     assert info["signed_in"] is None and info["folder"] is None
     codex = next(a for a in info["agents"] if a["agent"] == "Codex")
-    assert codex["mcp"] == "ours" and codex["skills"] == 7
+    assert codex["mcp"] == "ours" and codex["skills"] == 6
     assert cli.main(["status"]) == 0  # the human view, not linked: overview only
 
 
@@ -24,10 +24,10 @@ def test_status_in_a_linked_folder_names_the_space(home, monkeypatch, tmp_path, 
 
 
 def test_help_topics_and_aliases(capsys):
-    for t in ("overview", "mcp", "link", "sync", "capture", "secrets", "status", "setup", "skills"):
+    for t in ("overview", "mcp", "link", "sync", "integrations", "tools", "secrets", "status", "setup", "skills", "space"):
         assert cli.main(["help", t]) == 0
     out = capsys.readouterr().out
-    assert "aos sync --background" in out and "private preview" in out
+    assert "aos space sync" in out and "AgentOS" in out and "GMAIL_SEND_EMAIL" in out
     assert cli.main(["help", "nope"]) == 2
 
 

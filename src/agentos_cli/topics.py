@@ -4,48 +4,54 @@ from __future__ import annotations
 TOPICS: dict[str, tuple[str, str]] = {
     "overview": ("How the pieces fit", """
 AgentOS is your team's shared workspace: context, tasks, CRM, skills, keys and
-connected apps. `aos` puts it on this computer, in three ways:
+connected apps. `aos` puts it on this computer:
 
-  1. The MCP server      `aos setup` adds it to each coding agent (Claude Code,
-                         Codex, Cursor, Claude desktop…). The agent then calls
-                         AgentOS tools itself. Each agent signs in once.
-  2. Skills              `aos setup` installs the AgentOS skills into your agents,
-                         so they know how to use AgentOS and `aos`.
-  3. The `aos` command   you and your agents run AgentOS from the terminal:
-                         `aos context`, `aos call`, `aos secrets`, `aos connect`…
+  aos setup          adds AgentOS (an MCP server, plus skills) to each coding agent
+                     here: Claude Code, Codex, Cursor, Claude desktop… Each agent
+                     signs in once, then calls AgentOS itself.
+  aos context        what AgentOS knows about a person, company or topic.
+  aos integrations   everything you can do through AgentOS, in one list: its own
+                     actions (tasks, CRM, memory…) and your connected apps (Gmail,
+                     Slack, Stripe…). `aos integrations run <action>` does one.
+  aos connect        connect another app.   aos secrets   store API keys.
+  aos skills         the skills your agents use.
+  aos space          share a folder with people and agents (optional).
 
-Optional:
-  Spaces (`aos link`)    share a folder with people and agents, with versions.
-                         You push and pull, or `aos sync` does it as you work.
-  Capture                compression and work capture. Private preview.
-
-`aos status` shows all of it at a glance. Topics: aos help setup | mcp | skills |
-spaces | sync | capture | secrets | status
+`aos status` shows all of it at a glance.
+Topics: aos help setup | integrations | space | secrets | skills | status
 """),
     "setup": ("aos setup", """
 Finds the coding agents on this computer and shows one line per agent: what it
 gets (the AgentOS MCP server, N skills) and which file changes. Enter applies
 it. Every file is backed up to ~/.agentos/backups first, and `aos setup --undo`
-puts them back.
+puts them back. If you have skills of your own, setup asks once whether to add
+them to your workspace (default: not now). Run it again any time.
 
-If you have skills of your own, setup asks once whether to add them to your
-workspace (default: not now). Run it again any time: it only does what's missing.
+Each agent then signs in once:
+  Claude Code      run /mcp, pick agentos, Authenticate
+  Codex            codex mcp login agentos
+  Cursor           Settings → MCP → Connect
+  Claude desktop   quit (⌘Q) and reopen; needs Node 18+
 
   aos setup --yes                  no questions (agents use this)
   aos setup --agents codex,cursor  only these agents
   aos setup --dry-run              show the plan, change nothing
 """),
-    "mcp": ("The AgentOS MCP server", """
-MCP is how a coding agent calls AgentOS tools directly. `aos setup` adds a
-server named `agentos` (https://tryagentos.net/api/mcp) to each agent's config.
-No token is written: each agent signs in once with your AgentOS account.
+    "integrations": ("aos integrations: everything you can do", """
+One list of actions, from two places:
+  AgentOS     your workspace itself: tasks, CRM, memory, files, meetings…
+              (names like tasks_list, crm_contacts_search)
+  your apps   Gmail, Slack, Stripe, HubSpot… connected to AgentOS
+              (names like GMAIL_SEND_EMAIL). AgentOS holds their logins.
 
-  Claude Code      run /mcp, pick agentos, Authenticate
-  Codex            codex mcp login agentos
-  Cursor           Settings → MCP → Connect
-  Claude desktop   quit (⌘Q) and reopen; needs Node 18+ (it uses mcp-remote)
+  aos integrations                     AgentOS and your connected apps
+  aos integrations send email          find actions by words
+  aos integrations show GMAIL_SEND_EMAIL     what it does, its arguments
+  aos integrations run tasks_list '{"status":"open"}'
+  echo '{"to":"…"}' | aos integrations run GMAIL_SEND_EMAIL
 
-`aos status` shows which agents have it.
+Exit code 2 means it's waiting for a person's approval: not done yet.
+An app that isn't connected: `aos connect <app>`.
 """),
     "skills": ("Skills", """
 Skills are folders with a SKILL.md that teach an agent how to do something.
@@ -53,72 +59,49 @@ Skills are folders with a SKILL.md that teach an agent how to do something.
   aos skills list           AgentOS skills and your workspace's skills
   aos skills add <name>     install one into every agent here
   aos skills push           add skills you wrote to your workspace
-  aos skills outdated / update / remove
+  aos skills remove <name>
 
 Installed skills live in ~/.claude/skills (Claude Code) and ~/.agents/skills
 (Codex, Cursor, opencode, Gemini). aos never touches a folder it didn't install.
 """),
-    "spaces": ("Spaces: sharing a folder (aos link)", """
+    "space": ("aos space: sharing a folder", """
 A space is a folder shared through AgentOS, with versions, like a tiny Git.
 
-  aos link my-project   tie this folder to a space
-  aos push -m "…"       upload your changes as a new version
-  aos pull              download what others changed (never overwrites your edits)
-  aos status            what changed, who's ahead, who has claimed what
-  aos claim / handoff / wait   coordinate with other people and agents
+  aos space link my-project   tie this folder to a space
+  aos space push -m "…"       upload your changes as a new version
+  aos space pull              download what others changed (never overwrites yours)
+  aos space sync              push and pull for you while it runs; Ctrl-C stops it
+  aos space status            what changed, who's ahead, who claimed what
+  aos space claim / handoff / wait   coordinate with other people and agents
 
-Changes move when you (or your agent) run `aos push` and `aos pull`, or
-automatically while `aos sync` runs (`aos help sync`). `aos watch` shows
-changes as they happen.
+Changes move only when you push or pull, or while `aos space sync` is running in
+a terminal. There's no background mode: leave sync open in a tab. Don't set up
+scripts or login items for it; macOS flags them as from an unidentified developer.
 """),
-    "sync": ("aos sync: push and pull for you", """
-In a linked folder, `aos sync` watches it: a few seconds after you stop
-editing it pushes, and every 15 s it pulls newer versions. If you both changed
-a file it stops, so nothing is overwritten: merge, `aos resolve <file>`, and
-run it again. A file someone else has claimed waits until they release it.
-
-  aos sync                 in this terminal (Ctrl-C stops)
-  aos sync --background    keep syncing while you're logged in (macOS login item)
-  aos sync --stop          turn background sync off for this folder
-  aos sync --once          pull and push once, then exit
-
---background tells you first that macOS will show "Background Items Added",
-maybe with "unidentified developer": that item is aos itself, and it's expected.
-Don't write your own sync script or LaunchAgent; use this. `aos status` shows
-whether it's running.
-"""),
-    "capture": ("Capture and compression", """
-Capture is separate from spaces. It runs a small proxy on this computer that:
-  • compresses large tool output so your agents use fewer tokens, and
-  • (if you turn it on) learns decisions and fixes from your coding sessions
-    in folders you choose, and adds them to your team's AgentOS memory.
-
-It is in private preview and isn't installed by `aos`. `aos status` says
-whether it's on. You don't need it for anything else in aos.
-"""),
-    "secrets": ("Keys and connected apps", """
+    "secrets": ("Keys", """
   aos secrets set stripe_api_key     store a key (hidden prompt or stdin)
   aos secrets list                   names only, never values
   aos http stripe_api_key <url>      call an API; AgentOS adds the key
-  aos connect hubspot                connect an app with its own sign-in
 
-Keys stay in AgentOS: they never land on this computer. Storing keys needs one
-extra permission: `aos login --scope secrets`.
+Keys stay in AgentOS and never land on this computer. Storing keys needs one
+extra permission: `aos login --scope secrets`. Apps with their own sign-in
+(Gmail, HubSpot…) are connected with `aos connect <app>` instead.
 """),
     "status": ("aos status", """
-One view of everything on this computer: who you're signed in as, which agents
-have the AgentOS MCP server and skills, whether capture is running, and, in a
-linked folder, the space (changes, versions, claims).
+One view: who you're signed in as, which agents have the AgentOS MCP server and
+skills, and whether this folder is shared as a space (then its details follow).
 
-  aos status          the overview (plus the space, in a linked folder)
-  aos status --json   the overview for scripts and agents
-  aos doctor          the same checks, plus a live connection test
+  aos status          the overview
+  aos status --json   the same, for scripts and agents
+  aos status --check  also tests the connection to AgentOS
 """),
 }
 
-ALIASES = {"link": "spaces", "space": "spaces", "auto-sync": "sync", "autosync": "sync", "push": "spaces", "pull": "spaces",
-           "compression": "capture", "keys": "secrets", "connect": "secrets", "credentials": "secrets",
-           "login": "setup", "agents": "mcp", "about": "overview", "concepts": "overview"}
+ALIASES = {"spaces": "space", "link": "space", "sync": "space", "auto-sync": "space", "autosync": "space",
+           "push": "space", "pull": "space", "tools": "integrations", "call": "integrations", "apps": "integrations",
+           "actions": "integrations", "keys": "secrets", "connect": "secrets", "credentials": "secrets",
+           "login": "setup", "mcp": "setup", "agents": "setup", "about": "overview", "concepts": "overview",
+           "doctor": "status"}
 
 
 def show(topic: str | None) -> int:
