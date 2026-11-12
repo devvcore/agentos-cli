@@ -215,6 +215,24 @@ def install(skill: Skill, base: Path, force: bool = False) -> tuple[str, Path | 
     return status, dest
 
 
+# AgentOS skills that were removed; setup takes out copies it installed (unless edited).
+RETIRED = {"agentos-spaces"}
+
+
+def retire(bases: list[Path]) -> list[Path]:
+    """Remove our installed copies of retired AgentOS skills. Returns what was removed."""
+    gone = []
+    for base in bases:
+        for name in RETIRED:
+            for folder in (name, "agentos-" + name):
+                d = base / folder
+                m = read_marker(d)
+                if m and m.get("source") == "agentos" and m.get("id") in RETIRED and not _edited(d, m):
+                    shutil.rmtree(d)
+                    gone.append(d)
+    return gone
+
+
 def installed(bases: list[Path]) -> list[dict]:
     out = []
     for base in bases:

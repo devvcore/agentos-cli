@@ -7,7 +7,7 @@ def sk(body="hello", sid="demo"):
 
 def test_bundled_skills_ship_with_the_cli():
     names = {s.name for s in S.bundled()}
-    assert {"aos", "agentos-setup", "agentos-spaces", "agentos-crm", "agentos-meetings", "agentos-tasks", "agentos-workspace"} <= names
+    assert {"aos", "agentos-setup", "agentos-crm", "agentos-meetings", "agentos-tasks", "agentos-workspace"} == names
     for s in S.bundled():
         assert s.files["SKILL.md"].startswith(b"---\nname: ")
 

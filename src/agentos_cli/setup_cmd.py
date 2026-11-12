@@ -419,6 +419,9 @@ def run(args) -> int:
                         got[u] = got.get(u, 0) + 1
             except Exception as e:
                 ui.fail(f"skill {sk.name}: {e}")
+    if c.bundled:
+        for d in S.retire([b for b, _ in S.target_dirs([x.id for x in c.agents])]):
+            rec.setdefault("retired", []).append(str(d))
     for name, n in got.items():
         result.setdefault(name, []).append(f"{n} skill{'s' * (n != 1)}")
     from rich.table import Table

@@ -1,18 +1,17 @@
-"""`aos sync`: keep a linked folder and its space in step, without running `aos push` by hand.
+"""`aos space sync`: keep a linked folder and its space in step, without running `aos space push` by hand.
 
 It watches the folder and the space:
 - a change here, once the folder has been quiet for a moment, is pushed;
 - a newer version in the space is pulled first;
 - a conflict (you both changed a file) stops sync, so nothing is overwritten:
-  merge, `aos resolve <file>`, and start it again;
+  merge, `aos space resolve <file>`, and start it again;
 - a file someone else has claimed is left alone (said once) until they release it.
 
-It runs in the foreground (Ctrl-C stops it), or with --background as a macOS
-login item that runs `aos sync` itself. There is no separate script: an agent
-writing its own unsigned `auto-sync.sh` LaunchAgent is what made macOS ask about
-an "unidentified developer". macOS still shows a "Background Items Added" notice
-for any login item that isn't from a signed app, so --background says so, and
-what it is, before it installs.
+It runs in the foreground only (Ctrl-C stops it); leave it open in a terminal tab.
+There is no background mode: a login item is what makes macOS show its
+"unidentified developer" / "Background Items Added" notice, and needing Apple
+signing for it wasn't worth it (decided Nov 12). v0.2.8–0.2.9 had --background;
+`aos space sync --stop` still removes a login item those versions installed.
 """
 from __future__ import annotations
 
@@ -68,7 +67,7 @@ def _cycle(root: Path, remote_due: bool, quiet: bool, state: dict) -> int | None
     """One round. Returns an exit code to stop with, or None to keep going."""
     st = spaces.load_state(root)
     if st.get("conflicts"):
-        _say(f"conflict in {', '.join(st['conflicts'])}: merge, `aos resolve <file>`, then `aos sync` again.")
+        _say(f"conflict in {', '.join(st['conflicts'])}: merge, `aos space resolve <file>`, then `aos space sync` again.")
         return 1
     sp = spaces.open_space(st)
     if remote_due:
@@ -76,7 +75,7 @@ def _cycle(root: Path, remote_due: bool, quiet: bool, state: dict) -> int | None
         if head > st["version"]:
             rc = spaces.cmd_pull(_ns())
             if rc == 1:
-                _say("stopped so nothing is overwritten. Merge, `aos resolve <file>`, then `aos sync` again.")
+                _say("stopped so nothing is overwritten. Merge, `aos space resolve <file>`, then `aos space sync` again.")
                 return 1
             st = spaces.load_state(root)
     if not quiet:
@@ -87,7 +86,7 @@ def _cycle(root: Path, remote_due: bool, quiet: bool, state: dict) -> int | None
     try:
         rc = spaces.cmd_push(_ns(message=f"aos sync: {len(added)} added, {len(changed)} changed, {len(removed)} removed"))
     except SystemExit as e:  # the space moved between our check and the push
-        if "Run `aos pull` first" in str(e) or "same moment" in str(e):
+        if "Run `aos space pull` first" in str(e) or "same moment" in str(e):
             state["force_remote"] = True
             return None
         raise
@@ -170,53 +169,6 @@ def all_background() -> list[dict]:
     return out
 
 
-EXPLAIN = """Background sync runs `aos sync` for this folder whenever you're logged in to this Mac.
-  macOS will show "Background Items Added" for it, maybe with "unidentified developer":
-  that is aos (installed with uv, not a signed app), and it's expected. Turn it off any time
-  with `aos sync --stop`, or in System Settings > General > Login Items & Extensions."""
-
-
-def start_background(root: Path, yes: bool) -> int:
-    if sys.platform != "darwin":
-        print("aos: background sync is set up for macOS only. Elsewhere, run `aos sync` under your own\n"
-              "  service manager (systemd, tmux, nohup) in this folder.", file=sys.stderr)
-        return 1
-    exe = shutil.which("aos") or sys.argv[0]
-    if not exe or not os.path.exists(exe):
-        print("aos: couldn't find the aos command to run in the background.", file=sys.stderr)
-        return 1
-    print(EXPLAIN)
-    if not yes:
-        if not sys.stdin.isatty():
-            print("aos: pass --yes to turn on background sync without a question.", file=sys.stderr)
-            return 2
-        if input("Turn it on? [Y/n] ").strip().lower() not in ("", "y", "yes"):
-            print("Nothing changed.")
-            return 0
-    plist = {
-        "Label": _label(root),
-        "ProgramArguments": [os.path.realpath(exe), "sync", "--dir", str(root)],
-        "WorkingDirectory": str(root),
-        "RunAtLoad": True,
-        # Restarted after a crash, not after a stop: a conflict exits 0 in the background (see main).
-        "KeepAlive": {"SuccessfulExit": False},
-        "ThrottleInterval": 30,
-        "StandardOutPath": str(_log_path(root)),
-        "StandardErrorPath": str(_log_path(root)),
-        "EnvironmentVariables": {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "AOS_SYNC_BACKGROUND": "1"},
-    }
-    p = _plist_path(root)
-    p.parent.mkdir(parents=True, exist_ok=True)
-    subprocess.run(["launchctl", "bootout", f"gui/{os.getuid()}", str(p)], capture_output=True)
-    p.write_bytes(plistlib.dumps(plist))
-    r = subprocess.run(["launchctl", "bootstrap", f"gui/{os.getuid()}", str(p)], capture_output=True, text=True)
-    if r.returncode != 0:
-        print(f"aos: launchd didn't start it ({r.stderr.strip() or r.returncode}).", file=sys.stderr)
-        return 1
-    print(f"Background sync is on for {root}. Log: {_log_path(root)}  ·  stop: aos sync --stop")
-    return 0
-
-
 def stop_background(root: Path) -> int:
     p = _plist_path(root)
     if not p.exists():
@@ -231,12 +183,12 @@ def stop_background(root: Path) -> int:
 # ---------------------------------------------------------------- cli
 
 def main(argv=None) -> int:
-    p = argparse.ArgumentParser(prog="aos sync", description="Keep this linked folder and its space in step.")
+    p = argparse.ArgumentParser(prog="aos space sync", description="Keep this linked folder and its space in step "
+                                "while it runs (foreground; Ctrl-C stops it).")
     p.add_argument("--dir", help="the linked folder (default: this one)")
     p.add_argument("--once", action="store_true", help="pull and push once, then exit")
-    p.add_argument("--background", action="store_true", help="keep syncing while you're logged in (macOS)")
-    p.add_argument("--stop", action="store_true", help="turn background sync off for this folder")
-    p.add_argument("--yes", "-y", action="store_true")
+    p.add_argument("--background", action="store_true", help=argparse.SUPPRESS)
+    p.add_argument("--stop", action="store_true", help="remove a background sync left by aos 0.2.8–0.2.9")
     p.add_argument("--interval", type=float, default=REMOTE_EVERY_S, help="seconds between checks for new versions")
     a = p.parse_args(argv)
     try:  # a log file (background) or a pipe must see each line as it happens
@@ -247,19 +199,16 @@ def main(argv=None) -> int:
     start = Path(a.dir).expanduser() if a.dir else Path.cwd()
     root = spaces.find_root(start)
     if not root:
-        print("aos: this folder isn't linked to a space. Run `aos link <space>` here first.", file=sys.stderr)
+        print("aos: this folder isn't linked to a space. Run `aos space link <name>` here first.", file=sys.stderr)
         return 1
     if a.stop:
         return stop_background(root)
     if a.background:
-        return start_background(root, a.yes)
+        print("aos: background sync was removed. Run `aos space sync` in a terminal tab and leave it open.",
+              file=sys.stderr)
+        return 2
     try:
-        rc = run(root, once=a.once, remote_every=a.interval)
-        if rc == 1 and os.environ.get("AOS_SYNC_BACKGROUND"):
-            _say("background sync paused until you fix this and run `aos sync --background` again.")
-            subprocess.run(["launchctl", "bootout", f"gui/{os.getuid()}/{_label(root)}"], capture_output=True)
-            return 0
-        return rc
+        return run(root, once=a.once, remote_every=a.interval)
     except KeyboardInterrupt:
         _say("sync stopped.")
         return 0
