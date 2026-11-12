@@ -30,8 +30,9 @@ HELP = [
         ("connect <app>", "connect Gmail, HubSpot, Stripe… with its own sign-in"),
     ]),
     ("Keys", [
-        ("secrets set <name> · list", "store a key in AgentOS; list names, never values"),
-        ("http <key> <url>", "call an API with a stored key; it never reaches you"),
+        ("secrets list · get <name>", "your stored keys; print one"),
+        ("secrets run -- <command>", "run a command with your keys as environment variables"),
+        ("secrets set <name> · log", "store or replace a key; who read which key, and when"),
     ]),
     ("Skills", [
         ("skills list · add · remove · push", "skills in your agents; push adds yours"),
