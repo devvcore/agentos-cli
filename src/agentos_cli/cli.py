@@ -30,9 +30,9 @@ HELP = [
         ("connect <app>", "connect Gmail, HubSpot, Stripe… with its own sign-in"),
     ]),
     ("Keys", [
-        ("secrets list · get <name>", "your stored keys; print one"),
-        ("secrets run -- <command>", "run a command with your keys as environment variables"),
-        ("secrets set <name> · log", "store or replace a key; who read which key, and when"),
+        ("secrets list", "your stored keys (names, never values)"),
+        ("secrets get <name>", "print a key's value, e.g. KEY=$(aos secrets get stripe_api_key)"),
+        ("secrets set <name>", "store or replace a key"),
     ]),
     ("Skills", [
         ("skills list · add · remove · push", "skills in your agents; push adds yours"),

@@ -36,7 +36,7 @@ class Fake:
         raise AssertionError(name)
 
 
-@pytest.fixture(params=[True, False], ids=["secrets_read", "fallback"])
+@pytest.fixture(params=[False], ids=["secrets_get"])
 def fake(request, monkeypatch, home):
     f = Fake(request.param)
     monkeypatch.setattr(work, "_TOP", None)
@@ -47,30 +47,10 @@ def fake(request, monkeypatch, home):
 def test_get_prints_exactly_the_value_when_piped(fake, capsys):
     assert cli.main(["secrets", "get", "stripe_api_key"]) == 0
     assert capsys.readouterr().out == VALUES["stripe_api_key"]
-    purpose = [a.get("purpose") for n, a in fake.calls if n == "secrets_read"]
-    assert purpose in ([], ["get"])
 
 
 def test_get_missing_is_an_error(fake, capsys):
     assert cli.main(["secrets", "get", "nope"]) == 1
-
-
-def test_run_injects_env_and_masks_piped_output(fake, capfdbinary):
-    code = "import os,sys; print(os.environ['STRIPE_API_KEY']); print(os.environ['DB_URL'], file=sys.stderr)"
-    assert cli.main(["secrets", "run", "--", sys.executable, "-c", code]) == 0
-    out = capfdbinary.readouterr()
-    assert b"<concealed by aos>" in out.out and VALUES["stripe_api_key"].encode() not in out.out
-    assert VALUES["db_url"].encode() not in out.err
-
-
-def test_run_only_and_no_mask(fake, capfdbinary):
-    code = "import os; print(os.environ.get('STRIPE_API_KEY'), os.environ.get('DB_URL'))"
-    assert cli.main(["secrets", "run", "--only", "stripe_api_key", "--no-mask", "--", sys.executable, "-c", code]) == 0
-    assert capfdbinary.readouterr().out.strip() == f"{VALUES['stripe_api_key']} None".encode()
-
-
-def test_run_passes_the_exit_code(fake):
-    assert cli.main(["secrets", "run", "--", sys.executable, "-c", "raise SystemExit(7)"]) == 7
 
 
 def test_scope_error_says_how_to_fix(home, monkeypatch):
@@ -93,4 +73,14 @@ def test_env_names_match_the_server_rule():
 def test_secrets_help_has_no_http(capsys):
     assert cli.main(["secrets"]) == 0
     out = capsys.readouterr().out
-    assert "aos secrets run" in out and "aos http" not in out
+    assert "aos secrets get" in out and "$(aos secrets get stripe_api_key)" in out
+    assert "aos http" not in out and "secrets run" not in out and "secrets log" not in out
+
+
+def test_get_works_inline_in_a_shell(fake, capfd):
+    import subprocess
+    out = subprocess.run(["sh", "-c", 'printf "%s" "$K"'], capture_output=True, text=True,
+                         env={"K": VALUES["stripe_api_key"]}).stdout
+    assert out == VALUES["stripe_api_key"]  # sanity: what $(aos secrets get …) hands the program
+    assert cli.main(["secrets", "get", "stripe_api_key"]) == 0
+    assert capfd.readouterr().out == VALUES["stripe_api_key"]  # no newline, so $( ) gets the exact value

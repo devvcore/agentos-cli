@@ -1,25 +1,16 @@
 """`aos secrets`: keys stored in AgentOS, used from this computer.
 
-  aos secrets list                   names and descriptions (never values)
-  aos secrets get NAME               the value, on stdout
-  aos secrets run [--only a,b] -- CMD  run CMD with secrets as environment variables
-  aos secrets set NAME               store or rotate one (hidden prompt or stdin)
-  aos secrets log [NAME]             who read which secret, when, from where
+  aos secrets list         names and descriptions (never values)
+  aos secrets get NAME     the value, on stdout
+  aos secrets set NAME     store or rotate one (hidden prompt or stdin)
 
-This is the model AWS Secrets Manager, Doppler, 1Password and Infisical use:
-the person (or their agent) may read a secret they have access to, and every
-read is logged on the server (who, which secret, when, which client), never
-the value. AgentOS decides access: your personal secrets are yours; workspace
-secrets go to members with access; bot-only and app-only credentials are never
-returned. Reading needs the stored-credentials permission (`aos login --scope
-secrets`).
+The AWS Secrets Manager model: a person (or their agent) may read a secret they
+have access to, and the server records every read; the record is viewed in the
+web app, not here. Personal secrets are their owner's; workspace secrets go to
+members with access; bot-only and app-only credentials are never returned.
 
-The server reads secrets with `secrets_read` (batch, with the client and purpose
-in the audit row) when it has it, and with `secrets_get` (one at a time, audited)
-otherwise.
-
-`aos http` and `aos connect` live here too (http: an API call where AgentOS adds
-the key on its side; now an unlisted alias).
+Reads use `secrets_get` (audited on the server). `aos http` and `aos connect`
+also live here (http is an unlisted alias from 0.2).
 """
 from __future__ import annotations
 
@@ -27,9 +18,7 @@ import getpass
 import json
 import os
 import re
-import subprocess
 import sys
-import threading
 import webbrowser
 from concurrent.futures import ThreadPoolExecutor
 
@@ -102,7 +91,8 @@ def cmd_set(a) -> int:
         else:
             ui.ok(f"Stored {res.get('name')} (…{res.get('last_4', '')}) in your workspace{extra}.")
             if not res.get("hosts"):
-                ui.dim(f"  Use it: aos secrets run -- <command>  (as ${env_name(res.get('name')) or res.get('name')})")
+                n = res.get("name")
+                ui.dim(f"  Use it: {env_name(n) or 'KEY'}=$(aos secrets get {n}) <your command>")
         return 0
     ui.fail(f"Not stored: {(res or {}).get('error') if isinstance(res, dict) else res}")
     return 1
@@ -144,34 +134,10 @@ def env_name(name: str) -> str | None:
     return out
 
 
-def _client_label() -> str:
-    from . import __version__
-    return f"aos-cli {__version__}"
-
-
-def read_secrets(names: list[str], purpose: str) -> tuple[list[dict], list[dict]]:
-    """([{name, env, value, scope?}], [{name, error}]). One audited server read per secret."""
+def read_secrets(names: list[str]) -> tuple[list[dict], list[dict]]:
+    """([{name, env, value}], [{name, error}]), one audited `secrets_get` per name."""
     from .work import connect, call
-    from .mcp import ToolError
     client = connect()
-    try:
-        res = call(client, "secrets_read", {"names": names, "purpose": purpose, "client": _client_label()})
-    except ToolError as e:
-        if "workspace tool" not in str(e) and "unknown" not in str(e).lower():
-            if "missing_permission" in str(e).lower() or "workspace:secrets" in str(e):
-                raise SystemExit("aos: " + NEEDS_SCOPE)
-            raise
-        res = None  # this server has no secrets_read yet: one secrets_get per name
-    except RuntimeError as e:
-        if "missing_permission" in str(e).lower() or "workspace:secrets" in str(e):
-            raise SystemExit("aos: " + NEEDS_SCOPE)
-        raise
-    if isinstance(res, dict) and "secrets" in res:
-        got = [{"name": r["name"], "env": r.get("env") or env_name(r["name"]), "value": r["value"],
-                "scope": r.get("scope")} for r in res["secrets"] if isinstance(r, dict) and "value" in r]
-        bad = [{"name": n, "error": "not found"} for n in res.get("missing") or []] + \
-              [{"name": n, "error": "you don't have access"} for n in res.get("denied") or []]
-        return got, bad
 
     def one(n):
         try:
@@ -190,7 +156,7 @@ def read_secrets(names: list[str], purpose: str) -> tuple[list[dict], list[dict]
 
 
 def cmd_get(a) -> int:
-    got, bad = read_secrets([a.name], "get")
+    got, bad = read_secrets([a.name])
     if bad or not got:
         ui.fail(f"{a.name}: {(bad[0]['error'] if bad else 'not found')}")
         return 1
@@ -203,101 +169,6 @@ def cmd_get(a) -> int:
         sys.stdout.write(value)  # piped: exactly the value, no newline
     return 0
 
-
-def _all_names() -> list[str]:
-    res = _call("secrets_list", {})
-    rows = res.get("secrets", res) if isinstance(res, dict) else res
-    return [r["name"] for r in rows or [] if isinstance(r, dict) and r.get("name")]
-
-
-MASK = "<concealed by aos>"
-
-
-def _pump(src, dst, values: list[bytes]):
-    for line in iter(src.readline, b""):
-        for v in values:
-            if v and v in line:
-                line = line.replace(v, MASK.encode())
-        dst.write(line)
-        dst.flush()
-    src.close()
-
-
-def cmd_run(a) -> int:
-    cmd = list(a.cmd)
-    if cmd and cmd[0] == "--":
-        cmd = cmd[1:]
-    if not cmd:
-        raise SystemExit("aos: say what to run, after --: aos secrets run -- npm start")
-    names = [n.strip() for n in (a.only or "").split(",") if n.strip()] or _all_names()
-    if not names:
-        ui.warn("No secrets to add; running it as is.")
-    got, bad = read_secrets(names, "run") if names else ([], [])
-    for b in bad:
-        ui.err.print(f"[yellow]![/] {b['name']}: {b['error']}; not set")
-    env = dict(os.environ)
-    seen = {}
-    for r in got:
-        var = r["env"]
-        if not var:
-            ui.err.print(f"[yellow]![/] {r['name']}: its name can't be an environment variable; not set")
-            continue
-        if var in seen:
-            ui.err.print(f"[yellow]![/] {r['name']} and {seen[var]} both become ${var}; kept {seen[var]}")
-            continue
-        seen[var] = r["name"]
-        env[var] = r["value"]
-    if a.verbose:
-        ui.err.print("[dim]aos: set " + (", ".join(f"${v}" for v in seen) or "nothing") + "[/]")
-    # Hide values in the program's output when it goes somewhere other than this
-    # terminal (an agent, a log, a pipe): that's where they leak. A person at a
-    # terminal gets the program untouched, so interactive tools keep working.
-    mask = a.mask if a.mask is not None else not sys.stdout.isatty()
-    values = sorted({r["value"].encode() for r in got if len(r["value"]) >= 4}, key=len, reverse=True)
-    try:
-        if not mask or not values:
-            return subprocess.call(cmd, env=env)
-        p = subprocess.Popen(cmd, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        ts = [threading.Thread(target=_pump, args=(p.stdout, sys.stdout.buffer, values), daemon=True),
-              threading.Thread(target=_pump, args=(p.stderr, sys.stderr.buffer, values), daemon=True)]
-        for t in ts:
-            t.start()
-        rc = p.wait()
-        for t in ts:
-            t.join()
-        return rc
-    except FileNotFoundError:
-        ui.fail(f"{cmd[0]}: command not found")
-        return 127
-    except KeyboardInterrupt:
-        return 130
-
-
-def cmd_log(a) -> int:
-    args = {"limit": a.limit, **({"name": a.name} if a.name else {})}
-    try:
-        res = _call("secrets_access_log", args)
-    except RuntimeError as e:
-        if "workspace tool" in str(e) or "unknown" in str(e).lower():
-            ui.warn("This AgentOS server doesn't show the read log yet. It's being added; reads are already recorded.")
-            return 1
-        raise
-    rows = (res or {}).get("access") if isinstance(res, dict) else res
-    if a.json or not sys.stdout.isatty():
-        print(json.dumps(res, default=str))
-        return 0
-    if not rows:
-        ui.dim("No reads recorded." + (f" ({a.name})" if a.name else ""))
-        return 0
-    t = ui.table("When", "Secret", "Who", "From", "Why")
-    for r in rows:
-        who = r.get("user") or r.get("user_id") or ""
-        if r.get("agent") or r.get("agent_id"):
-            who += f" via {r.get('agent') or r.get('agent_id')}"
-        t.add_row(str(r.get("at") or r.get("created_at") or "")[:19].replace("T", " "), f"[bold]{r.get('name') or r.get('secret_name') or ''}[/]",
-                  who, str(r.get("client") or r.get("tool_slug") or ""), str(r.get("purpose") or ""))
-    ui.console.print(t)
-    return 0
 
 
 def cmd_http(a) -> int:
@@ -354,29 +225,17 @@ def cmd_connect(a) -> int:
 
 SECRETS_USAGE = """usage: aos secrets <command>
 
-Keys stored in AgentOS (API keys, tokens, passwords), used from this computer.
+Keys stored in AgentOS (API keys, tokens, passwords).
 
-  aos secrets list                     your secrets: names and descriptions, never values
-  aos secrets get stripe_api_key       print the value
-  aos secrets run -- npm start         run a command with your secrets as environment
-                                       variables (stripe_api_key → $STRIPE_API_KEY)
-  aos secrets run --only stripe_api_key,db_url -- python report.py
-  aos secrets set stripe_api_key       store or replace one (hidden prompt, or stdin)
-  aos secrets log [name]               who read which secret, when, and from where
+  aos secrets list                  your secrets: names and descriptions, never values
+  aos secrets get stripe_api_key    print the value
+  aos secrets set stripe_api_key    store or replace one (hidden prompt, or stdin)
 
-Every read is recorded in AgentOS: who, which secret, when, from which app or
-agent. Never the value. Your personal secrets are only yours; workspace secrets
-go to members with access; bots' own credentials are never handed out.
+Use one in a script:
+  STRIPE_API_KEY=$(aos secrets get stripe_api_key) python report.py
 
-Reading values needs one extra permission, once: aos login --scope secrets
-
-options for run:
-  --only a,b        just these secrets (default: all you can use)
-  --mask/--no-mask  hide secret values in the command's output (default: hidden
-                    when output isn't your terminal, e.g. when an agent runs it)
-  -v                say which variables were set
-options for set:
-  -d TEXT           what it's for     --from-env VAR / --from-file PATH   read it from there"""
+AgentOS records every read (who, which secret, when); see it in Settings → Secrets.
+Reading values needs one extra permission, once: aos login --scope secrets"""
 
 
 def register(sub) -> None:
@@ -389,18 +248,6 @@ def register(sub) -> None:
     x.add_argument("name")
     x.add_argument("--json", action="store_true")
     x.set_defaults(fn=cmd_get)
-    x = ss.add_parser("run")
-    x.add_argument("--only")
-    x.add_argument("--mask", dest="mask", action="store_true", default=None)
-    x.add_argument("--no-mask", dest="mask", action="store_false")
-    x.add_argument("-v", "--verbose", action="store_true")
-    x.add_argument("cmd", nargs=_ap.REMAINDER)
-    x.set_defaults(fn=cmd_run)
-    x = ss.add_parser("log")
-    x.add_argument("name", nargs="?")
-    x.add_argument("--limit", type=int, default=50)
-    x.add_argument("--json", action="store_true")
-    x.set_defaults(fn=cmd_log)
     x = ss.add_parser("set", help="store or rotate a key; the value comes from a hidden prompt or stdin")
     x.add_argument("name")
     x.add_argument("-d", "--description", help="what it unlocks, e.g. 'Stripe live key for billing reports'")
